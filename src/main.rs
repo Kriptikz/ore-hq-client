@@ -1,4 +1,4 @@
-use std::{io::Read, ops::{ControlFlow, Range}, sync::Arc};
+use std::{io::Read, ops::{ControlFlow, Range}, sync::Arc, time::Duration};
 
 use drillx::equix;
 use futures_util::{SinkExt, StreamExt};
@@ -130,6 +130,13 @@ async fn main() {
                 {
                     let mut message_sender = message_sender.lock().await;
                     let _ = message_sender.send(Message::Binary(bin_data.to_vec())).await;
+                }
+
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                // send new ready message
+                {
+                    let mut message_sender = message_sender.lock().await;
+                    let _ = message_sender.send(Message::Binary(0u8.to_le_bytes().to_vec())).await;
                 }
             }
         }
