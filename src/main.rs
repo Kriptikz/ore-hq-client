@@ -60,13 +60,15 @@ async fn main() {
                                 let mut best_hash = drillx::Hash::default();
                                 let mut total_hashes: u64 = 0;
                                 loop {
-                                    total_hashes += 1;
                                     // Create hash
-                                    if let Ok(hash) = drillx::hash_with_memory(
+                                    let hashes = drillx::get_hashes_with_memory(
                                         &mut memory,
                                         &challenge,
-                                        &nonce.to_le_bytes(),
-                                    ) {
+                                        &nonce.to_le_bytes()
+                                    );
+
+                                    for hash in hashes {
+                                        total_hashes += 1;
                                         let difficulty = hash.difficulty();
                                         if difficulty.gt(&best_difficulty) {
                                                 best_nonce = nonce;
