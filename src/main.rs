@@ -153,7 +153,9 @@ async fn main() {
 
 fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>) -> ControlFlow<(), ()> {
     match msg {
-        Message::Text(t)=>{println!("Got Text data: {:?}",t);},
+        Message::Text(t)=>{
+            println!("\n>>> Server Message: \n{}\n",t);
+        },
         Message::Binary(b) => {
             println!("Got Binary data: {:?}", b);
             let message_type = b[0];
