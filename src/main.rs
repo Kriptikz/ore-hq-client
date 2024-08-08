@@ -6,17 +6,66 @@ use rpassword::read_password;
 use tokio::{sync::{mpsc::{UnboundedReceiver, UnboundedSender}, Mutex}, time::Instant};
 use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
 use base64::prelude::*;
+use clap::Parser;
+
+// --------------------------------
+
+/// A command line interface tool for pooling power to submit hashes for proportional ORE rewards
+#[derive(Parser, Debug)]
+#[command(version, author, about, long_about = None)]
+struct Args {
+    #[arg(long,
+        value_name = "SERVER_URL",
+        help = "URL of the server to connect to",
+        global = true
+    )]
+    url: Option<String>,
+
+    #[arg(
+        long,
+        default_value_t = 4,
+        help = "Amount of CPU threads of mine with"
+    )]
+    threads: u8,
+
+    #[arg(
+        long,
+        value_name = "USERNAME",
+        global = true,
+        help = "Username used to connect to the server"
+    )]
+    username: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "KEYPAIR_PATH",
+        help = "Filepath to keypair to use",
+        global = true
+    )]
+    keypair: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "MICROLAMPORTS",
+        help = "Number of microlamports to pay as priority fee per transaction",
+        default_value = "0",
+        global = true
+    )]
+    priority_fee: Option<u64>,
+}
+
+// --------------------------------
 
 #[derive(Debug)]
 pub enum ServerMessage {
     StartMining([u8; 32], Range<u64>, u64)
 }
 
-
 #[tokio::main]
 async fn main() {
     let url = url::Url::parse("wss://domainexpansion.tech/").expect("Failed to parse server url");
     let host = url.host_str().expect("Invalid host in server url");
+    let _args = Args::parse();
 
     print!("Username: ");
     let _ = io::stdout().flush();

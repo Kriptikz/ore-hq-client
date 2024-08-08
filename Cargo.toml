@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 base64 = "0.22.1"
+clap = { version = "4.5.13", features = ["derive"] }
 drillx = { path = "../../regolith-labs/forks/drillx/drillx" }
 futures-util = "0.3.30"
 rpassword = "7.3.1"
