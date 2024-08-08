@@ -1,29 +1,77 @@
-use std::{io::{self, Read, Write}, ops::{ControlFlow, Range}, sync::Arc, time::Duration};
+use std::{io::{self, Write}, ops::{ControlFlow, Range}, sync::Arc, time::Duration};
 
 use drillx::equix;
 use futures_util::{SinkExt, StreamExt};
 use rpassword::read_password;
-use tokio::{sync::{mpsc::{UnboundedReceiver, UnboundedSender}, Mutex}, time::Instant};
+use tokio::{sync::{mpsc::UnboundedSender, Mutex}, time::Instant};
 use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
 use base64::prelude::*;
+use clap::Parser;
+
+// --------------------------------
+
+/// A command line interface tool for pooling power to submit hashes for proportional ORE rewards
+#[derive(Parser, Debug)]
+#[command(version, author, about, long_about = None)]
+struct Args {
+    #[arg(long,
+        value_name = "SERVER_URL",
+        help = "URL of the server to connect to",
+        global = true
+    )]
+    url: Option<String>,
+
+    #[arg(
+        long,
+        default_value_t = 1,
+        help = "Amount of CPU threads of mine with"
+    )]
+    threads: u32,
+
+    #[arg(
+        long,
+        value_name = "USERNAME",
+        global = true,
+        help = "Username used to connect to the server"
+    )]
+    username: Option<String>,
+
+    // #[arg(
+    //     long,
+    //     value_name = "KEYPAIR_PATH",
+    //     help = "Filepath to keypair to use",
+    //     global = true
+    // )]
+    // keypair: Option<String>,
+
+    // #[arg(
+    //     long,
+    //     value_name = "MICROLAMPORTS",
+    //     help = "Number of microlamports to pay as priority fee per transaction",
+    //     default_value = "0",
+    //     global = true
+    // )]
+    // priority_fee: Option<u64>,
+}
+
+// --------------------------------
 
 #[derive(Debug)]
 pub enum ServerMessage {
     StartMining([u8; 32], Range<u64>, u64)
 }
 
-
 #[tokio::main]
 async fn main() {
-    let url = url::Url::parse("wss://domainexpansion.tech/").expect("Failed to parse server url");
+    let args = Args::parse();
+    let url_str = args.url.unwrap_or("wss://domainexpansion.tech".to_string());
+    let url = url::Url::parse(&url_str).expect("Failed to parse server url");
     let host = url.host_str().expect("Invalid host in server url");
 
-    print!("Username: ");
-    let _ = io::stdout().flush();
-    let mut username = String::new();
-    if let Err(e) = io::stdin().read_line(&mut username) {
-        println!("Error reading username input: {:?}", e);
-    }
+    let username = args.username.unwrap_or("user".to_string());
+
+    let threads = args.threads;
+
     print!("Password: ");
     let _ = io::stdout().flush();
     let password = read_password().expect("Failed to read password");
@@ -73,9 +121,8 @@ async fn main() {
                             println!("Mining starting...");
                             println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
-                            let threads = 1;
                             let nonces_per_thread = 10_000;
-                            let handles = (0..threads)
+                            let handles = (0..threads as u64)
                                 .map(|i| {
                                     std::thread::spawn({
                                         let mut memory = equix::SolverMemory::new();
