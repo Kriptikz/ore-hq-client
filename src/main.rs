@@ -26,11 +26,6 @@ struct Args {
         default_value_t = 1,
         help = "Amount of CPU threads of mine with"
     )]
-    #[arg(
-        long,
-        default_value_t = 1,
-        help = "Amount of CPU threads of mine with"
-    )]
     threads: u32,
 
     #[arg(
