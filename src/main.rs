@@ -88,21 +88,20 @@ async fn main() {
                                             let mut total_hashes: u64 = 0;
                                             loop {
                                                 // Create hash
-                                                let hashes = drillx::get_hashes_with_memory(
+                                                total_hashes += 1;
+                                                if let Ok(hx) = drillx::hash_with_memory(
                                                     &mut memory,
                                                     &challenge,
-                                                    &nonce.to_le_bytes()
-                                                );
-
-                                                for hash in hashes {
-                                                    total_hashes += 1;
-                                                    let difficulty = hash.difficulty();
+                                                    &nonce.to_le_bytes(),
+                                                ) {
+                                                    let difficulty = hx.difficulty();
                                                     if difficulty.gt(&best_difficulty) {
-                                                            best_nonce = nonce;
-                                                            best_difficulty = difficulty;
-                                                            best_hash = hash;
+                                                        best_nonce = nonce;
+                                                        best_difficulty = difficulty;
+                                                        best_hash = hx;
                                                     }
                                                 }
+
 
                                                 // Exit if processed nonce range
                                                 if nonce >= nonce_range.end {
