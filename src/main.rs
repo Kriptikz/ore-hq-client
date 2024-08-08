@@ -28,7 +28,7 @@ struct Args {
     )]
     #[arg(
         long,
-        default_value_t = 4,
+        default_value_t = 1,
         help = "Amount of CPU threads of mine with"
     )]
     threads: u32,
