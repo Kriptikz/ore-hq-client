@@ -122,18 +122,27 @@ async fn main() {
                             println!("Mining starting...");
                             println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
+                            let core_ids = core_affinity::get_core_ids().unwrap();
                             let nonces_per_thread = 10_000;
-                            let handles = (0..threads as u64)
+                            let handles = core_ids
+                                .into_iter()
                                 .map(|i| {
                                     std::thread::spawn({
                                         let mut memory = equix::SolverMemory::new();
                                         move || {
-                                            let first_nonce = nonce_range.start + (nonces_per_thread * i);
+                                            if (i.id as u32).ge(&threads) {
+                                                return None
+                                            } 
+
+                                            let _ = core_affinity::set_for_current(i);
+
+                                            let first_nonce = nonce_range.start + (nonces_per_thread * (i.id as u64));
                                             let mut nonce = first_nonce;
                                             let mut best_nonce = nonce;
                                             let mut best_difficulty = 0;
                                             let mut best_hash = drillx::Hash::default();
                                             let mut total_hashes: u64 = 0;
+
                                             loop {
                                                 // Create hash
                                                 total_hashes += 1;
