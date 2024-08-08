@@ -26,6 +26,11 @@ struct Args {
         default_value_t = 1,
         help = "Amount of CPU threads of mine with"
     )]
+    #[arg(
+        long,
+        default_value_t = 4,
+        help = "Amount of CPU threads of mine with"
+    )]
     threads: u32,
 
     #[arg(
@@ -67,6 +72,7 @@ async fn main() {
     let url_str = args.url.unwrap_or("wss://domainexpansion.tech".to_string());
     let url = url::Url::parse(&url_str).expect("Failed to parse server url");
     let host = url.host_str().expect("Invalid host in server url");
+    let _args = Args::parse();
 
     let username = args.username.unwrap_or("user".to_string());
 
