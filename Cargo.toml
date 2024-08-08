@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+base64 = "0.22.1"
 drillx = { path = "../../regolith-labs/forks/drillx/drillx" }
 futures-util = "0.3.30"
+rpassword = "7.3.1"
 tokio = { version = "1.39.2", features = ["full"] }
 tokio-tungstenite = { version = "0.23.1", features = ["native-tls"] }
+url = "2.5.2"
