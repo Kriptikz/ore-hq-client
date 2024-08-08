@@ -163,7 +163,9 @@ async fn main() {
 
                                                 if nonce % 100 == 0 {
                                                     if hash_timer.elapsed().as_secs().ge(&cutoff) {
-                                                        break;
+                                                        if best_difficulty.ge(&8) {
+                                                            break;
+                                                        }
                                                     }
                                                 } 
 
