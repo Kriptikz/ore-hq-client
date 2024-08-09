@@ -62,26 +62,26 @@ async fn main() {
 
     let key = read_keypair_file(keypair_path).expect(&format!("Failed to load keypair from file: {}", args.keypair));
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
-
-    let ts_msg = now.to_le_bytes();
-
-    let sig = key.sign_message(&ts_msg);
-
-    let mut url_str = args.url.unwrap_or("wss://domainexpansion.tech".to_string());
-    if url_str.chars().last().unwrap() != '/' {
-        url_str.push('/');
-    }
-
-    url_str.push_str(&format!("?timestamp={}", now));
-    let url = url::Url::parse(&url_str).expect("Failed to parse server url");
-    let host = url.host_str().expect("Invalid host in server url");
-    let threads = args.threads;
-
-
-    let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
-
     loop {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+
+        let ts_msg = now.to_le_bytes();
+
+        let sig = key.sign_message(&ts_msg);
+
+        let mut url_str = args.url.clone().unwrap_or("wss://domainexpansion.tech".to_string());
+        if url_str.chars().last().unwrap() != '/' {
+            url_str.push('/');
+        }
+
+        url_str.push_str(&format!("?timestamp={}", now));
+        let url = url::Url::parse(&url_str).expect("Failed to parse server url");
+        let host = url.host_str().expect("Invalid host in server url");
+        let threads = args.threads;
+
+
+        let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
+
         println!("Connecting to server...");
         let request = Request::builder()
             .method("GET")
