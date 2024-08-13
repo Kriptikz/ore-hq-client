@@ -7,11 +7,11 @@ pub async fn signup(url: String, key: Keypair) {
     let base_url = url;
     let client = reqwest::Client::new();
 
-    let resp = client.get(format!("http://{}/pool/authority/pubkey", base_url)).send().await.unwrap().text().await.unwrap();
+    let resp = client.get(format!("https://{}/pool/authority/pubkey", base_url)).send().await.unwrap().text().await.unwrap();
 
     let pool_pubkey = Pubkey::from_str(&resp).unwrap();
 
-    let resp = client.get(format!("http://{}/latest-blockhash", base_url)).send().await.unwrap().text().await.unwrap();
+    let resp = client.get(format!("https://{}/latest-blockhash", base_url)).send().await.unwrap().text().await.unwrap();
 
     let decoded_blockhash = BASE64_STANDARD.decode(resp).unwrap();
     let deserialized_blockhash = bincode::deserialize(&decoded_blockhash).unwrap();
@@ -26,7 +26,7 @@ pub async fn signup(url: String, key: Keypair) {
 
     let encoded_tx = BASE64_STANDARD.encode(&serialized_tx);
 
-    let resp = client.post(format!("http://{}/signup?pubkey={}", base_url, key.pubkey().to_string())).body(encoded_tx).send().await;
+    let resp = client.post(format!("https://{}/signup?pubkey={}", base_url, key.pubkey().to_string())).body(encoded_tx).send().await;
     if let Ok(res) = resp {
         if let Ok(txt) = res.text().await {
             match txt.as_str() {

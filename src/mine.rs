@@ -32,7 +32,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String) {
 
         let sig = key.sign_message(&ts_msg);
 
-        let mut ws_url_str = format!("ws://{}", url);
+        let mut ws_url_str = format!("wss://{}", url);
         if ws_url_str.chars().last().unwrap() != '/' {
             ws_url_str.push('/');
         }
