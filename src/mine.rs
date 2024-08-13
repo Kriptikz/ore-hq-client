@@ -120,9 +120,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String) {
 
                                             loop {
                                                 // Create hash
-                                                let hashes = drillx::get_hashes_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
-
-                                                for hx in hashes {
+                                                if let Ok(hx) = drillx::hash_with_memory(&mut memory, &challenge, &nonce.to_le_bytes()) {
                                                     total_hashes += 1;
                                                     let difficulty = hx.difficulty();
                                                     if difficulty.gt(&best_difficulty) {
