@@ -1,3 +1,4 @@
+use claim::ClaimArgs;
 use solana_sdk::signature::read_keypair_file;
 use clap::{Parser, Subcommand};
 
@@ -6,6 +7,8 @@ use signup::signup;
 
 mod signup;
 mod mine;
+mod claim;
+mod balance;
 
 // --------------------------------
 
@@ -37,6 +40,10 @@ enum Commands {
     Mine(MineArgs),
     #[command(about = "Transfer sol to the pool authority to sign up.")]
     Signup,
+    #[command(about = "Claim rewards.")]
+    Claim(ClaimArgs),
+    #[command(about = "Display claimable rewards.")]
+    Balance,
 }
 
 // --------------------------------
@@ -54,6 +61,12 @@ async fn main() {
         },
         Commands::Signup => {
             signup(base_url, key).await;
+        },
+        Commands::Claim(args) => {
+            claim::claim(args, key, base_url).await;
+        }
+        Commands::Balance => {
+            balance::balance(key, base_url).await;
         }
     }
 

@@ -8,6 +8,8 @@ base64 = "0.22.1"
 bincode = "1.3.3"
 clap = { version = "4.5.13", features = ["derive"] }
 core_affinity = "0.8.1"
+ore-api = "2.1.0"
+ore-utils = "2.1.0"
 drillx = "2.0.0"
 #drillx = { path = "../../regolith-labs/forks/drillx/drillx" }
 futures-util = "0.3.30"
