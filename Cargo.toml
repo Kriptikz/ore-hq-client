@@ -1,7 +1,9 @@
 [package]
 name = "ore-hq-client"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
+description = "Ore mining pool client."
+license = "Apache-2.0"
 
 [dependencies]
 base64 = "0.22.1"
