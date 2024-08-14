@@ -9,6 +9,7 @@ mod signup;
 mod mine;
 mod claim;
 mod balance;
+mod rewards;
 
 // --------------------------------
 
@@ -51,6 +52,8 @@ enum Commands {
     #[command(about = "Claim rewards.")]
     Claim(ClaimArgs),
     #[command(about = "Display claimable rewards.")]
+    Rewards,
+    #[command(about = "Display current ore token balance.")]
     Balance,
 }
 
@@ -73,6 +76,9 @@ async fn main() {
         },
         Commands::Claim(args) => {
             claim::claim(args, key, base_url, unsecure_conn).await;
+        }
+        Commands::Rewards => {
+            rewards::rewards(key, base_url, unsecure_conn).await;
         }
         Commands::Balance => {
             balance::balance(key, base_url, unsecure_conn).await;
