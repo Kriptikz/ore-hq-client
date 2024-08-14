@@ -31,6 +31,12 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     loop {
         let balance = client.get(format!("{}://{}/miner/balance?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
         println!("Balance: {}", balance);
+        let claim_amount = if claim_amount != 0 {
+            claim_amount
+        } else {
+            let balance_grains = (balance.parse::<f64>().unwrap() * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+            balance_grains
+        };
         println!("Sending claim request for amount {}...", claim_amount);
         let resp = client.post(format!("{}://{}/claim?pubkey={}&amount={}", url_prefix, base_url, key.pubkey().to_string(), claim_amount)).send().await;
 
