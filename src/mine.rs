@@ -3,7 +3,7 @@ use std::{ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, System
 use clap::{arg, Parser};
 use drillx::equix;
 use futures_util::{SinkExt, StreamExt};
-use solana_sdk::{signature::{read_keypair_file, Keypair}, signer::Signer};
+use solana_sdk::{signature::Keypair, signer::Signer};
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
 use base64::prelude::*;
