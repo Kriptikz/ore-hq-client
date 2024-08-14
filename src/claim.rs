@@ -29,8 +29,8 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
 
 
     loop {
-        let balance = client.get(format!("{}://{}/miner/balance?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
-        println!("Balance: {}", balance);
+        let balance = client.get(format!("{}://{}/miner/rewards?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
+        println!("Claimable Rewards: {}", balance);
         let claim_amount = if claim_amount != 0 {
             claim_amount
         } else {
