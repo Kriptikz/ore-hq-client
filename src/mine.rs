@@ -24,7 +24,7 @@ pub struct MineArgs {
     pub cores: u32,
 }
 
-pub async fn mine(args: MineArgs, key: Keypair, url: String) {
+pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
     loop {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
@@ -32,7 +32,12 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String) {
 
         let sig = key.sign_message(&ts_msg);
 
-        let mut ws_url_str = format!("wss://{}", url);
+        let mut ws_url_str = if unsecure {
+            format!("ws://{}", url)
+        } else {
+            format!("wss://{}", url)
+        };
+
         if ws_url_str.chars().last().unwrap() != '/' {
             ws_url_str.push('/');
         }

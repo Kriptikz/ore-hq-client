@@ -3,15 +3,21 @@ use std::str::FromStr;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction, transaction::Transaction};
 
-pub async fn signup(url: String, key: Keypair) {
+pub async fn signup(url: String, key: Keypair, unsecure: bool) {
     let base_url = url;
     let client = reqwest::Client::new();
 
-    let resp = client.get(format!("https://{}/pool/authority/pubkey", base_url)).send().await.unwrap().text().await.unwrap();
+    let url_prefix = if unsecure {
+        "http".to_string()
+    } else {
+        "https".to_string()
+    };
+
+    let resp = client.get(format!("{}://{}/pool/authority/pubkey", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
 
     let pool_pubkey = Pubkey::from_str(&resp).unwrap();
 
-    let resp = client.get(format!("https://{}/latest-blockhash", base_url)).send().await.unwrap().text().await.unwrap();
+    let resp = client.get(format!("{}://{}/latest-blockhash", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
 
     let decoded_blockhash = BASE64_STANDARD.decode(resp).unwrap();
     let deserialized_blockhash = bincode::deserialize(&decoded_blockhash).unwrap();
@@ -26,7 +32,7 @@ pub async fn signup(url: String, key: Keypair) {
 
     let encoded_tx = BASE64_STANDARD.encode(&serialized_tx);
 
-    let resp = client.post(format!("https://{}/signup?pubkey={}", base_url, key.pubkey().to_string())).body(encoded_tx).send().await;
+    let resp = client.post(format!("{}://{}/signup?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).body(encoded_tx).send().await;
     if let Ok(res) = resp {
         if let Ok(txt) = res.text().await {
             match txt.as_str() {

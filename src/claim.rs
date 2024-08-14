@@ -15,17 +15,24 @@ pub struct ClaimArgs {
     pub amount: f64,
 }
 
-pub async fn claim(args: ClaimArgs, key: Keypair, url: String) {
+pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     let claim_amount = (args.amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
 
     let base_url = url;
     let client = reqwest::Client::new();
 
+    let url_prefix = if unsecure {
+        "http".to_string()
+    } else {
+        "https".to_string()
+    };
+
+
     loop {
-        let balance = client.get(format!("https://{}/miner/balance?pubkey={}", base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
+        let balance = client.get(format!("{}://{}/miner/balance?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
         println!("Balance: {}", balance);
-        println!("Sending claim request...");
-        let resp = client.post(format!("https://{}/claim?pubkey={}&amount={}", base_url, key.pubkey().to_string(), claim_amount)).send().await;
+        println!("Sending claim request for amount {}...", claim_amount);
+        let resp = client.post(format!("{}://{}/claim?pubkey={}&amount={}", url_prefix, base_url, key.pubkey().to_string(), claim_amount)).send().await;
 
         match resp {
             Ok(res) => {
