@@ -23,3 +23,4 @@ solana-sdk = "1.18.12"
 tokio = { version = "1.39.2", features = ["full"] }
 tokio-tungstenite = { version = "0.23.1", features = ["native-tls"] }
 url = "2.5.2"
+spl-token = "6.0.0"

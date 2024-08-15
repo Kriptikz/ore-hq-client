@@ -1,4 +1,6 @@
 use std::time::Duration;
+use std::io::Read;
+use spl_token::amount_to_ui_amount;
 
 use clap::Parser;
 use solana_sdk::{signature::Keypair, signer::Signer};
@@ -13,6 +15,19 @@ pub struct ClaimArgs {
         help = "Amount of ore to claim."
     )]
     pub amount: f64,
+}
+
+pub fn ask_confirm(question: &str) -> bool {
+    println!("{}", question);
+    loop {
+        let mut input = [0];
+        let _ = std::io::stdin().read(&mut input);
+        match input[0] as char {
+            'y' | 'Y' => return true,
+            'n' | 'N' => return false,
+            _ => println!("Please type only Y or N to continue."),
+        }
+    }
 }
 
 pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
@@ -31,6 +46,22 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     loop {
         let balance = client.get(format!("{}://{}/miner/rewards?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
         println!("Claimable Rewards: {}", balance);
+
+                // Confirm user wants to claim
+                if !ask_confirm(
+                    format!(
+                        "\nYou are about to claim {}.\nAre you sure you want to continue? [Y/n]",
+                        format!(
+                            "{} ORE",
+                            amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS)
+                        )
+                    )
+                    .as_str(),
+                ) {
+                    return;
+                }
+
+
         let claim_amount = if claim_amount != 0 {
             claim_amount
         } else {

@@ -1,10 +1,37 @@
 use std::str::FromStr;
+use std::io::Read;
+use spl_token::amount_to_ui_amount;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction, transaction::Transaction};
 
+
+pub fn ask_confirm(question: &str) -> bool {
+    println!("{}", question);
+    loop {
+        let mut input = [0];
+        let _ = std::io::stdin().read(&mut input);
+        match input[0] as char {
+            'y' | 'Y' => return true,
+            'n' | 'N' => return false,
+            _ => println!("Please type only Y or N to continue."),
+        }
+    }
+}
+
+
 pub async fn signup(url: String, key: Keypair, unsecure: bool) {
     let base_url = url;
+
+    if !ask_confirm(
+        format!(
+            "\nYou are about to sign up to mine with Ec1ipse Mining Pool, this costs 0.001 Solana.\nWould you like to continue? [Y/n]"
+        )
+        .as_str(),
+    ) {
+        return;
+    }
+
     let client = reqwest::Client::new();
 
     let url_prefix = if unsecure {
