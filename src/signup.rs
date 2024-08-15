@@ -32,22 +32,6 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
         "https".to_string()
     };
 
-    let check_url = format!("{}://{}/check-user?pubkey={}", url_prefix, base_url, key.pubkey().to_string());
-    let check_resp = client.get(check_url).send().await.unwrap().text().await.unwrap();
-
-    if check_resp == "EXISTS" {
-        println!("Already a user, please utilize the 'mine' command to begin mining!");
-        return;
-    }
-
-    if !ask_confirm(
-        format!(
-            "\nYou are about to sign up to mine with {}, this costs 0.001 Solana.\nWould you like to continue? [Y/n]",
-            base_url
-        ).as_str(),
-    ) {
-        return;
-    }
 
     let resp = client.get(format!("{}://{}/pool/authority/pubkey", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
 
