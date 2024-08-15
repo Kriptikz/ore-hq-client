@@ -1,10 +1,29 @@
 use std::str::FromStr;
+use std::io::Read;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction, transaction::Transaction};
+use std::io::{self, Write};
+
+pub fn ask_confirm(question: &str) -> bool {
+    println!("{}", question);
+    loop {
+        io::stdout().flush().unwrap();  // Ensure prompt is printed before reading input
+
+        let mut input = String::new();
+        let _ = std::io::stdin().read_line(&mut input);
+
+        match input.trim().chars().next() {
+            Some('y') | Some('Y') => return true,
+            Some('n') | Some('N') => return false,
+            _ => println!("Please type only Y or N to continue."),
+        }
+    }
+}
 
 pub async fn signup(url: String, key: Keypair, unsecure: bool) {
     let base_url = url;
+
     let client = reqwest::Client::new();
 
     let url_prefix = if unsecure {
@@ -12,6 +31,7 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
     } else {
         "https".to_string()
     };
+
 
     let resp = client.get(format!("{}://{}/pool/authority/pubkey", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
 
@@ -39,6 +59,9 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
                 "SUCCESS" => {
                     println!("Successfully signed up!");
                 },
+                "EXISTS" => {
+                    println!("You're already signed up!");
+                }
                 _ => {
                     println!("Transaction failed, please wait and try again.");
                 }
