@@ -234,26 +234,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             }
 
                             tokio::time::sleep(Duration::from_secs(3)).await;
-                            // send new Ready message
-                            let now = if let Ok(response) = client.get(format!("{}://{}/timestamp", http_prefix, base_url)).send().await {
-                                if let Ok(ts) = response.text().await {
-                                    if let Ok(ts) = ts.parse::<u64>() {
-                                        ts
-                                    } else {
-                                        println!("Server response body for /timestamp failed to parse, contact admin.");
-                                        tokio::time::sleep(Duration::from_secs(3)).await;
-                                        continue;
-                                    }
-                                } else {
-                                    println!("Server response body for /timestamp is empty, contact admin.");
-                                    tokio::time::sleep(Duration::from_secs(3)).await;
-                                    continue;
-                                }
-                            } else {
-                                println!("Server restarting, trying again in 3 seconds...");
-                                tokio::time::sleep(Duration::from_secs(3)).await;
-                                continue;
-                            };
+
+                            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
                             let msg = now.to_le_bytes();
                             let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
