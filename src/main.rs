@@ -1,15 +1,15 @@
 use claim::ClaimArgs;
-use solana_sdk::signature::read_keypair_file;
 use clap::{Parser, Subcommand};
+use solana_sdk::signature::read_keypair_file;
 
 use mine::MineArgs;
 use signup::signup;
 
-mod signup;
-mod mine;
-mod claim;
 mod balance;
+mod claim;
+mod mine;
 mod rewards;
+mod signup;
 
 // --------------------------------
 
@@ -17,30 +17,27 @@ mod rewards;
 #[derive(Parser, Debug)]
 #[command(version, author, about, long_about = None)]
 struct Args {
-    #[arg(long,
+    #[arg(
+        long,
         value_name = "SERVER_URL",
         help = "URL of the server to connect to",
-        default_value = "ec1ipse.me",
+        default_value = "ec1ipse.me"
     )]
     url: String,
 
-    #[arg(
-        long,
-        value_name = "KEYPAIR_PATH",
-        help = "Filepath to keypair to use",
-    )]
+    #[arg(long, value_name = "KEYPAIR_PATH", help = "Filepath to keypair to use")]
     keypair: String,
 
     #[arg(
         long,
         short,
         action,
-        help = "Use unsecure http connection instead of https.",
+        help = "Use unsecure http connection instead of https."
     )]
     use_http: bool,
 
     #[command(subcommand)]
-    command: Commands
+    command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
@@ -59,21 +56,21 @@ enum Commands {
 
 // --------------------------------
 
-
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
     let base_url = args.url;
     let unsecure_conn = args.use_http;
-    let key = read_keypair_file(args.keypair.clone()).expect(&format!("Failed to load keypair from file: {}", args.keypair));
+    let key = read_keypair_file(args.keypair.clone())
+        .unwrap_or_else(|_| panic!("Failed to load keypair from file: {}", args.keypair));
     match args.command {
         Commands::Mine(args) => {
             mine::mine(args, key, base_url, unsecure_conn).await;
-        },
+        }
         Commands::Signup => {
             signup(base_url, key, unsecure_conn).await;
-        },
+        }
         Commands::Claim(args) => {
             claim::claim(args, key, base_url, unsecure_conn).await;
         }
@@ -84,7 +81,4 @@ async fn main() {
             balance::balance(key, base_url, unsecure_conn).await;
         }
     }
-
-
 }
-

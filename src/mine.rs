@@ -1,16 +1,26 @@
-use std::{ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{
+    ops::{ControlFlow, Range},
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
+use base64::prelude::*;
 use clap::{arg, Parser};
 use drillx::equix;
 use futures_util::{SinkExt, StreamExt};
 use solana_sdk::{signature::Keypair, signer::Signer};
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
-use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
-use base64::prelude::*;
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        handshake::client::{generate_key, Request},
+        Message,
+    },
+};
 
 #[derive(Debug)]
 pub enum ServerMessage {
-    StartMining([u8; 32], Range<u64>, u64)
+    StartMining([u8; 32], Range<u64>, u64),
 }
 
 #[derive(Debug, Parser)]
@@ -33,7 +43,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             format!("wss://{}", url)
         };
 
-        if ws_url_str.chars().last().unwrap() != '/' {
+        if !ws_url_str.ends_with('/') {
             ws_url_str.push('/');
         }
 
@@ -45,7 +55,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             "https".to_string()
         };
 
-        let timestamp = if let Ok(response) = client.get(format!("{}://{}/timestamp", http_prefix, base_url)).send().await {
+        let timestamp = if let Ok(response) = client
+            .get(format!("{}://{}/timestamp", http_prefix, base_url))
+            .send()
+            .await
+        {
             if let Ok(ts) = response.text().await {
                 if let Ok(ts) = ts.parse::<u64>() {
                     ts
@@ -74,7 +88,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
         let host = url.host_str().expect("Invalid host in server url");
         let threads = args.cores;
 
-
         let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
 
         println!("Connecting to server...");
@@ -95,7 +108,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 println!("Connected to network!");
 
                 let (mut sender, mut receiver) = ws_stream.split();
-                let (message_sender, mut message_receiver) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
+                let (message_sender, mut message_receiver) =
+                    tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
 
                 let receiver_thread = tokio::spawn(async move {
                     while let Some(Ok(message)) = receiver.next().await {
@@ -106,7 +120,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 });
 
                 // send Ready message
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_secs();
 
                 let msg = now.to_le_bytes();
                 let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
@@ -138,12 +155,13 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                         let mut memory = equix::SolverMemory::new();
                                         move || {
                                             if (i.id as u32).ge(&threads) {
-                                                return None
-                                            } 
+                                                return None;
+                                            }
 
                                             let _ = core_affinity::set_for_current(i);
 
-                                            let first_nonce = nonce_range.start + (nonces_per_thread * (i.id as u64));
+                                            let first_nonce = nonce_range.start
+                                                + (nonces_per_thread * (i.id as u64));
                                             let mut nonce = first_nonce;
                                             let mut best_nonce = nonce;
                                             let mut best_difficulty = 0;
@@ -152,7 +170,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                                             loop {
                                                 // Create hash
-                                                if let Ok(hx) = drillx::hash_with_memory(&mut memory, &challenge, &nonce.to_le_bytes()) {
+                                                if let Ok(hx) = drillx::hash_with_memory(
+                                                    &mut memory,
+                                                    &challenge,
+                                                    &nonce.to_le_bytes(),
+                                                ) {
                                                     total_hashes += 1;
                                                     let difficulty = hx.difficulty();
                                                     if difficulty.gt(&best_difficulty) {
@@ -167,41 +189,46 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                                     break;
                                                 }
 
-                                                if nonce % 100 == 0 {
-                                                    if hash_timer.elapsed().as_secs().ge(&cutoff) {
-                                                        if best_difficulty.ge(&8) {
-                                                            break;
-                                                        }
-                                                    }
-                                                } 
-
+                                                if nonce % 100 == 0
+                                                    && hash_timer.elapsed().as_secs().ge(&cutoff)
+                                                    && best_difficulty.ge(&8)
+                                                {
+                                                    break;
+                                                }
 
                                                 // Increment nonce
                                                 nonce += 1;
                                             }
-                                            
+
                                             // Return the best nonce
-                                            Some((best_nonce, best_difficulty, best_hash, total_hashes))
+                                            Some((
+                                                best_nonce,
+                                                best_difficulty,
+                                                best_hash,
+                                                total_hashes,
+                                            ))
                                         }
                                     })
                                 })
                                 .collect::<Vec<_>>();
 
-                                // Join handles and return best nonce
-                                let mut best_nonce: u64 = 0;
-                                let mut best_difficulty = 0;
-                                let mut best_hash = drillx::Hash::default();
-                                let mut total_nonces_checked = 0;
-                                for h in handles {
-                                    if let Ok(Some((nonce, difficulty, hash, nonces_checked))) = h.join() {
-                                        total_nonces_checked += nonces_checked;
-                                        if difficulty > best_difficulty {
-                                            best_difficulty = difficulty;
-                                            best_nonce = nonce;
-                                            best_hash = hash;
-                                        }
+                            // Join handles and return best nonce
+                            let mut best_nonce: u64 = 0;
+                            let mut best_difficulty = 0;
+                            let mut best_hash = drillx::Hash::default();
+                            let mut total_nonces_checked = 0;
+                            for h in handles {
+                                if let Ok(Some((nonce, difficulty, hash, nonces_checked))) =
+                                    h.join()
+                                {
+                                    total_nonces_checked += nonces_checked;
+                                    if difficulty > best_difficulty {
+                                        best_difficulty = difficulty;
+                                        best_nonce = nonce;
+                                        best_hash = hash;
                                     }
                                 }
+                            }
 
                             let hash_time = hash_timer.elapsed();
 
@@ -209,19 +236,22 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Processed: {}", total_nonces_checked);
                             println!("Hash time: {:?}", hash_time);
 
-
-                            let message_type =  2u8; // 1 u8 - BestSolution Message
+                            let message_type = 2u8; // 1 u8 - BestSolution Message
                             let best_hash_bin = best_hash.d; // 16 u8
                             let best_nonce_bin = best_nonce.to_le_bytes(); // 8 u8
-                            
+
                             let mut hash_nonce_message = [0; 24];
                             hash_nonce_message[0..16].copy_from_slice(&best_hash_bin);
                             hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
-                            let signature = key.sign_message(&hash_nonce_message).to_string().as_bytes().to_vec();
+                            let signature = key
+                                .sign_message(&hash_nonce_message)
+                                .to_string()
+                                .as_bytes()
+                                .to_vec();
 
                             let mut bin_data = [0; 57];
                             bin_data[00..1].copy_from_slice(&message_type.to_le_bytes());
-                            bin_data[01..17].copy_from_slice(&best_hash_bin);
+                            bin_data[1..17].copy_from_slice(&best_hash_bin);
                             bin_data[17..25].copy_from_slice(&best_nonce_bin);
                             bin_data[25..57].copy_from_slice(&key.pubkey().to_bytes());
 
@@ -235,7 +265,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                             tokio::time::sleep(Duration::from_secs(3)).await;
 
-                            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs();
 
                             let msg = now.to_le_bytes();
                             let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
@@ -254,7 +287,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 }
 
                 let _ = receiver_thread.await;
-            }, 
+            }
             Err(e) => {
                 match e {
                     tokio_tungstenite::tungstenite::Error::Http(e) => {
@@ -263,78 +296,77 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                         } else {
                             println!("Http Error: {:?}", e);
                         }
-                    }, 
+                    }
                     _ => {
                         println!("Error: {:?}", e);
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(3)).await;
-
             }
         }
     }
 }
 
-fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>) -> ControlFlow<(), ()> {
+fn process_message(
+    msg: Message,
+    message_channel: UnboundedSender<ServerMessage>,
+) -> ControlFlow<(), ()> {
     match msg {
-        Message::Text(t)=>{
-            println!("\n>>> Server Message: \n{}\n",t);
-        },
+        Message::Text(t) => {
+            println!("\n>>> Server Message: \n{}\n", t);
+        }
         Message::Binary(b) => {
             let message_type = b[0];
             match message_type {
-                    0 => {
-                        if b.len() < 49 {
-                            println!("Invalid data for Message StartMining");
-                        } else {
-                            let mut hash_bytes = [0u8; 32];
-                            // extract 256 bytes (32 u8's) from data for hash
-                            let mut b_index = 1;
-                            for i in 0..32 {
-                                hash_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 32;
+                0 => {
+                    if b.len() < 49 {
+                        println!("Invalid data for Message StartMining");
+                    } else {
+                        let mut hash_bytes = [0u8; 32];
+                        // extract 256 bytes (32 u8's) from data for hash
+                        let mut b_index = 1;
+                        hash_bytes.copy_from_slice(&b[b_index..(32 + b_index)]);
+                        b_index += 32;
 
-                            // extract 64 bytes (8 u8's)
-                            let mut cutoff_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                cutoff_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 8;
-                            let cutoff = u64::from_le_bytes(cutoff_bytes);
+                        // extract 64 bytes (8 u8's)
+                        let mut cutoff_bytes = [0u8; 8];
+                        cutoff_bytes.copy_from_slice(&b[b_index..(8 + b_index)]);
+                        b_index += 8;
+                        let cutoff = u64::from_le_bytes(cutoff_bytes);
 
-                            let mut nonce_start_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                nonce_start_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 8;
-                            let nonce_start = u64::from_le_bytes(nonce_start_bytes);
+                        let mut nonce_start_bytes = [0u8; 8];
+                        nonce_start_bytes.copy_from_slice(&b[b_index..(8 + b_index)]);
+                        b_index += 8;
+                        let nonce_start = u64::from_le_bytes(nonce_start_bytes);
 
-                            let mut nonce_end_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                nonce_end_bytes[i] = b[i + b_index];
-                            }
-                            let nonce_end = u64::from_le_bytes(nonce_end_bytes);
+                        let mut nonce_end_bytes = [0u8; 8];
+                        nonce_end_bytes.copy_from_slice(&b[b_index..(8 + b_index)]);
+                        let nonce_end = u64::from_le_bytes(nonce_end_bytes);
 
-                            let msg = ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
+                        let msg =
+                            ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
 
-                            let _ = message_channel.send(msg);
-                        }
-
-                    },
-                    _ => {
-                        println!("Failed to parse server message type");
+                        let _ = message_channel.send(msg);
                     }
                 }
-
-        },
-        Message::Ping(v) => {println!("Got Ping: {:?}", v);}, 
-        Message::Pong(v) => {println!("Got Pong: {:?}", v);}, 
+                _ => {
+                    println!("Failed to parse server message type");
+                }
+            }
+        }
+        Message::Ping(v) => {
+            println!("Got Ping: {:?}", v);
+        }
+        Message::Pong(v) => {
+            println!("Got Pong: {:?}", v);
+        }
         Message::Close(v) => {
             println!("Got Close: {:?}", v);
             return ControlFlow::Break(());
-        }, 
-        _ => {println!("Got invalid message data");}
+        }
+        _ => {
+            println!("Got invalid message data");
+        }
     }
 
     ControlFlow::Continue(())

@@ -1,6 +1,6 @@
-use std::time::Duration;
-use std::io::{self, Write};
 use spl_token::amount_to_ui_amount;
+use std::io::{self, Write};
+use std::time::Duration;
 
 use clap::Parser;
 use solana_sdk::{signature::Keypair, signer::Signer};
@@ -33,7 +33,8 @@ pub fn ask_confirm(question: &str) -> bool {
 }
 
 pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
-    let mut claim_amount = (args.amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+    let mut claim_amount =
+        (args.amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
 
     let base_url = url;
     let client = reqwest::Client::new();
@@ -45,8 +46,22 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     };
 
     loop {
-        let balance = client.get(format!("{}://{}/miner/rewards?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
-        let balance_grains = (balance.parse::<f64>().unwrap() * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+        let balance = client
+            .get(format!(
+                "{}://{}/miner/rewards?pubkey={}",
+                url_prefix,
+                base_url,
+                key.pubkey()
+            ))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let balance_grains = (balance.parse::<f64>().unwrap()
+            * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64))
+            as u64;
         println!("Claimable Rewards: {} ORE", balance);
 
         if claim_amount == 0 {
@@ -54,14 +69,21 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         }
 
         if claim_amount > balance_grains {
-            println!("You do not have enough rewards to claim {} ORE.", amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS));
-            println!("Please enter an amount less than or equal to {} ORE.", amount_to_ui_amount(balance_grains, ore_api::consts::TOKEN_DECIMALS));
+            println!(
+                "You do not have enough rewards to claim {} ORE.",
+                amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS)
+            );
+            println!(
+                "Please enter an amount less than or equal to {} ORE.",
+                amount_to_ui_amount(balance_grains, ore_api::consts::TOKEN_DECIMALS)
+            );
             claim_amount = loop {
                 let mut input = String::new();
                 io::stdout().flush().unwrap();
                 let _ = std::io::stdin().read_line(&mut input);
                 if let Ok(new_amount) = input.trim().parse::<f64>() {
-                    let new_claim_amount = (new_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+                    let new_claim_amount =
+                        (new_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
                     if new_claim_amount <= balance_grains {
                         break new_claim_amount;
                     }
@@ -73,11 +95,8 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         // Confirm user wants to claim
         if !ask_confirm(
             format!(
-                "\nYou are about to claim {}.\nAre you sure you want to continue? [Y/n]",
-                format!(
-                    "{} ORE",
-                    amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS)
-                )
+                "\nYou are about to claim {} ORE.\nAre you sure you want to continue? [Y/n]",
+                amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS)
             )
             .as_str(),
         ) {
@@ -85,21 +104,27 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         }
 
         println!("Sending claim request for amount {}...", claim_amount);
-        let resp = client.post(format!("{}://{}/claim?pubkey={}&amount={}", url_prefix, base_url, key.pubkey().to_string(), claim_amount)).send().await;
+        let resp = client
+            .post(format!(
+                "{}://{}/claim?pubkey={}&amount={}",
+                url_prefix,
+                base_url,
+                key.pubkey(),
+                claim_amount
+            ))
+            .send()
+            .await;
 
         match resp {
-            Ok(res) => {
-                match res.text().await.unwrap().as_str() {
-                    "SUCCESS" => {
-                        println!("Successfully claimed rewards!");
-                        break;
-                    },
-                    _ => {
-                        println!("Retrying in 10 seconds...");
-                        tokio::time::sleep(Duration::from_secs(10)).await;
-                    }
+            Ok(res) => match res.text().await.unwrap().as_str() {
+                "SUCCESS" => {
+                    println!("Successfully claimed rewards!");
+                    break;
                 }
-
+                _ => {
+                    println!("Retrying in 10 seconds...");
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
             },
             Err(_e) => {
                 println!("Retrying in 5 seconds...");

@@ -10,6 +10,18 @@ pub async fn rewards(key: Keypair, url: String, unsecure: bool) {
         "https".to_string()
     };
 
-    let balance = client.get(format!("{}://{}/miner/rewards?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
+    let balance = client
+        .get(format!(
+            "{}://{}/miner/rewards?pubkey={}",
+            url_prefix,
+            base_url,
+            key.pubkey()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     println!("Claimable Rewards:  {}", balance);
 }
