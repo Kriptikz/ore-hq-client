@@ -94,14 +94,19 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
                         println!("Successfully claimed rewards!");
                         break;
                     },
-                    _ => {
-                        println!("Retrying in 10 seconds...");
-                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    other => {
+                        let time = other.parse::<u64>().unwrap();
+                        let time_left = 1800 - time;
+                        let secs = time_left % 60;
+                        let mins = (time_left / 60) % 60;
+                        println!("Time left until next claim available: {}m {}s", mins, secs);
+                        break;
                     }
                 }
 
             },
-            Err(_e) => {
+            Err(e) => {
+                println!("ERROR: {}", e);
                 println!("Retrying in 5 seconds...");
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
