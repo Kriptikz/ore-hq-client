@@ -68,21 +68,23 @@ impl NonceSelectorState {
 fn select_nonce(state: &NonceSelectorState, rng: &mut impl Rng) -> u64 {
     const JUMP_INTERVAL: u64 = 10000;
     
-    let mut current = state.current.load(Ordering::Relaxed);
-    if current >= state.chunk_start + state.chunk_size {
-        current = state.chunk_start;
-        state.current.store(current, Ordering::Relaxed);
+    let current = state.current.load(Ordering::Relaxed);
+    let last_jump = state.last_jump.load(Ordering::Relaxed);
+
+    if current >= state.chunk_start.wrapping_add(state.chunk_size) {
+        state.current.store(state.chunk_start, Ordering::Relaxed);
+        return state.chunk_start;
     }
 
-    let last_jump = state.last_jump.load(Ordering::Relaxed);
-    if current - last_jump >= JUMP_INTERVAL {
-        current = state.chunk_start + rng.gen_range(0..state.chunk_size);
-        state.current.store(current, Ordering::Relaxed);
-        state.last_jump.store(current, Ordering::Relaxed);
+    if current.wrapping_sub(last_jump) >= JUMP_INTERVAL {
+        let new_current = state.chunk_start.wrapping_add(rng.gen_range(0..state.chunk_size));
+        state.current.store(new_current, Ordering::Relaxed);
+        state.last_jump.store(new_current, Ordering::Relaxed);
+        return new_current;
     }
 
     let nonce = if rng.gen_bool(0.1) {
-        state.chunk_start + rng.gen_range(0..state.chunk_size)
+        state.chunk_start.wrapping_add(rng.gen_range(0..state.chunk_size))
     } else {
         current
     };
@@ -95,7 +97,7 @@ fn select_nonce(state: &NonceSelectorState, rng: &mut impl Rng) -> u64 {
 fn mine_chunk(
     challenge: &[u8; 32],
     state: &NonceSelectorState,
-    cutoff_time: &AtomicU64,
+    cutoff_time: u64,
     global_best_difficulty: &AtomicU32,
     adaptive_min_difficulty: &AtomicU32,
     stop_signal: &AtomicBool,
@@ -113,7 +115,7 @@ fn mine_chunk(
 
         let nonce = select_nonce(state, &mut rng);
 
-        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= cutoff_time.load(Ordering::Relaxed) {
+        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= cutoff_time {
             break;
         }
 
@@ -122,8 +124,8 @@ fn mine_chunk(
             
             if difficulty > best_result.1 {
                 best_result = (nonce, difficulty, hx, total_nonces_checked + 1);
-                global_best_difficulty.fetch_max(difficulty, Ordering::Release);
-                adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
+                let _ = global_best_difficulty.fetch_max(difficulty, Ordering::Release);
+                let _ = adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
             }
         }
 
@@ -141,26 +143,26 @@ fn mine_chunk(
 fn optimized_mining(
     challenge: &[u8; 32],
     nonce_range: Range<u64>,
-    cutoff_time: &AtomicU64,
+    cutoff_time: u64,
     global_best_difficulty: &AtomicU32,
     adaptive_min_difficulty: &AtomicU32,
     cores: usize,
 ) -> (u64, u32, drillx::Hash, u64) {
-    let stop_signal = AtomicBool::new(false);
-    let range_size = nonce_range.end - nonce_range.start;
+    let stop_signal = Arc::new(AtomicBool::new(false));
+    let range_size = nonce_range.end.wrapping_sub(nonce_range.start);
     let chunk_size = range_size / cores as u64;
     
     let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
 
     let states: Vec<_> = (0..cores)
         .map(|i| {
-            let chunk_start = nonce_range.start + (chunk_size * i as u64);
+            let chunk_start = nonce_range.start.wrapping_add(chunk_size.wrapping_mul(i as u64));
             let chunk_end = if i == cores - 1 {
                 nonce_range.end
             } else {
-                chunk_start + chunk_size
+                chunk_start.wrapping_add(chunk_size)
             };
-            NonceSelectorState::new(chunk_start, chunk_end - chunk_start)
+            NonceSelectorState::new(chunk_start, chunk_end.wrapping_sub(chunk_start))
         })
         .collect();
 
@@ -174,7 +176,7 @@ fn optimized_mining(
                 global_best_difficulty,
                 adaptive_min_difficulty,
                 &stop_signal,
-                seed + i as u64,
+                seed.wrapping_add(i as u64),
             )
         })
         .collect();
@@ -183,9 +185,9 @@ fn optimized_mining(
 
     results.into_iter().reduce(|acc, x| {
         if x.1 > acc.1 {
-            (x.0, x.1, x.2, acc.3 + x.3)
+            (x.0, x.1, x.2, acc.3.wrapping_add(x.3))
         } else {
-            (acc.0, acc.1, acc.2, acc.3 + x.3)
+            (acc.0, acc.1, acc.2, acc.3.wrapping_add(x.3))
         }
     }).unwrap_or_default()
 }
@@ -211,14 +213,19 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             Ok(response) => {
                 match response.text().await {
                     Ok(ts) => {
-                        ts.parse::<u64>().unwrap_or_else(|_| {
-                            eprintln!("Server response body for /timestamp failed to parse, contact admin.");
-                            0
-                        })
+                        match ts.parse::<u64>() {
+                            Ok(timestamp) => timestamp,
+                            Err(_) => {
+                                eprintln!("Server response body for /timestamp failed to parse, contact admin.");
+                                tokio::time::sleep(Duration::from_secs(3)).await;
+                                continue;
+                            }
+                        }
                     }
                     Err(_) => {
                         eprintln!("Server response body for /timestamp is empty, contact admin.");
-                        0
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                        continue;
                     }
                 }
             }
@@ -228,11 +235,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 continue;
             }
         };
-
-        if timestamp == 0 {
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            continue;
-        }
 
         println!("Server Timestamp: {}", timestamp);
 
@@ -300,14 +302,14 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
                             
-                            let cutoff_time = AtomicU64::new(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + cutoff);
+                            let cutoff_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + cutoff;
                             let global_best_difficulty = AtomicU32::new(0);
                             let adaptive_min_difficulty = AtomicU32::new(min_difficulty);
 
                             let (best_nonce, best_difficulty, best_hash, total_nonces_checked) = optimized_mining(
                                 &challenge,
                                 nonce_range,
-                                &cutoff_time,
+                                cutoff_time,
                                 &global_best_difficulty,
                                 &adaptive_min_difficulty,
                                 cores,
