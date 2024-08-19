@@ -22,6 +22,16 @@ use tokio_tungstenite::{
     },
 };
 
+// Constants for tuning performance
+const MIN_CHUNK_SIZE: u64 = 1_000_000;
+const MAX_CHUNK_SIZE: u64 = 10_000_000;
+
+// Thread-local storage for frequently accessed data
+thread_local! {
+    static SOLVER_MEMORY: std::cell::RefCell<equix::SolverMemory> = std::cell::RefCell::new(equix::SolverMemory::new());
+    static RNG: std::cell::RefCell<ChaCha20Rng> = std::cell::RefCell::new(ChaCha20Rng::from_entropy());
+}
+
 #[derive(Debug)]
 pub enum ServerMessage {
     StartMining([u8; 32], Range<u64>, u64),
@@ -47,100 +57,74 @@ pub struct MineArgs {
     pub expected_min_difficulty: u32,
 }
 
-struct NonceSelectorState {
-    chunk_start: u64,
-    chunk_size: u64,
-    current: AtomicU64,
-    last_jump: AtomicU64,
+struct MiningResult {
+    nonce: u64,
+    difficulty: u32,
+    hash: drillx::Hash,
+    nonces_checked: u64,
 }
 
-impl NonceSelectorState {
-    fn new(chunk_start: u64, chunk_size: u64) -> Self {
-        Self {
-            chunk_start,
-            chunk_size,
-            current: AtomicU64::new(chunk_start),
-            last_jump: AtomicU64::new(0),
-        }
-    }
-}
-
-fn select_nonce(state: &NonceSelectorState, rng: &mut impl Rng) -> u64 {
-    const JUMP_INTERVAL: u64 = 10000;
+fn calculate_dynamic_chunk_size(nonce_range: &Range<u64>, threads: usize) -> u64 {
+    let range_size = nonce_range.end - nonce_range.start;
+    let chunks_per_thread = 4; // Adjust this value to fine-tune the number of chunks per thread
+    let ideal_chunk_size = range_size / (threads * chunks_per_thread) as u64;
     
-    let current = state.current.load(Ordering::Relaxed);
-    let last_jump = state.last_jump.load(Ordering::Relaxed);
-
-    if current >= state.chunk_start.wrapping_add(state.chunk_size) {
-        state.current.store(state.chunk_start, Ordering::Relaxed);
-        return state.chunk_start;
-    }
-
-    if current.wrapping_sub(last_jump) >= JUMP_INTERVAL {
-        let new_current = state.chunk_start.wrapping_add(rng.gen_range(0..state.chunk_size));
-        state.current.store(new_current, Ordering::Relaxed);
-        state.last_jump.store(new_current, Ordering::Relaxed);
-        return new_current;
-    }
-
-    let nonce = if rng.gen_bool(0.1) {
-        state.chunk_start.wrapping_add(rng.gen_range(0..state.chunk_size))
-    } else {
-        current
-    };
-
-    state.current.fetch_add(1, Ordering::Relaxed);
-
-    nonce
+    ideal_chunk_size.clamp(MIN_CHUNK_SIZE, MAX_CHUNK_SIZE)
 }
 
 fn mine_chunk(
     challenge: &[u8; 32],
-    state: &NonceSelectorState,
+    nonce_range: Range<u64>,
     cutoff_time: u64,
     global_best_difficulty: &AtomicU32,
     adaptive_min_difficulty: &AtomicU32,
     stop_signal: &AtomicBool,
-    seed: u64,
-) -> (u64, u32, drillx::Hash, u64) {
-    let mut best_result = (0, 0, drillx::Hash::default(), 0);
-    let mut total_nonces_checked = 0;
-    let mut mem = equix::SolverMemory::new();
-    let mut rng = ChaCha20Rng::seed_from_u64(seed);
+) -> MiningResult {
+    let mut best_result = MiningResult {
+        nonce: 0,
+        difficulty: 0,
+        hash: drillx::Hash::default(),
+        nonces_checked: 0,
+    };
 
-    loop {
-        if stop_signal.load(Ordering::Relaxed) {
-            break;
-        }
+    // Use thread-local storage for SolverMemory
+    SOLVER_MEMORY.with(|mem| {
+        for nonce in nonce_range {
+            if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= cutoff_time {
+                break;
+            }
 
-        let nonce = select_nonce(state, &mut rng);
+            if stop_signal.load(Ordering::Relaxed) {
+                break;
+            }
 
-        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= cutoff_time {
-            break;
-        }
+            if let Ok(hx) = drillx::hash_with_memory(&mut mem.borrow_mut(), challenge, &nonce.to_le_bytes()) {
+                let difficulty = hx.difficulty();
+                
+                if difficulty > best_result.difficulty {
+                    best_result = MiningResult {
+                        nonce,
+                        difficulty,
+                        hash: hx,
+                        nonces_checked: best_result.nonces_checked + 1,
+                    };
+                    let _ = global_best_difficulty.fetch_max(difficulty, Ordering::Release);
+                    let _ = adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
+                }
+            }
 
-        if let Ok(hx) = drillx::hash_with_memory(&mut mem, challenge, &nonce.to_le_bytes()) {
-            let difficulty = hx.difficulty();
-            
-            if difficulty > best_result.1 {
-                best_result = (nonce, difficulty, hx, total_nonces_checked + 1);
-                let _ = global_best_difficulty.fetch_max(difficulty, Ordering::Release);
-                let _ = adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
+            best_result.nonces_checked += 1;
+
+            if best_result.nonces_checked % 10_000 == 0 && stop_signal.load(Ordering::Relaxed) {
+                break;
             }
         }
+    });
 
-        total_nonces_checked += 1;
-
-        if total_nonces_checked % 1000 == 0 && stop_signal.load(Ordering::Relaxed) {
-            break;
-        }
-    }
-
-    best_result.3 = total_nonces_checked;
     best_result
 }
 
-fn optimized_mining(
+fn optimized_mining_rayon(
     challenge: &[u8; 32],
     nonce_range: Range<u64>,
     cutoff_time: u64,
@@ -149,47 +133,56 @@ fn optimized_mining(
     cores: usize,
 ) -> (u64, u32, drillx::Hash, u64) {
     let stop_signal = Arc::new(AtomicBool::new(false));
-    let range_size = nonce_range.end.wrapping_sub(nonce_range.start);
-    let chunk_size = range_size / cores as u64;
     
-    let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
-
-    let states: Vec<_> = (0..cores)
-        .map(|i| {
-            let chunk_start = nonce_range.start.wrapping_add(chunk_size.wrapping_mul(i as u64));
-            let chunk_end = if i == cores - 1 {
-                nonce_range.end
-            } else {
-                chunk_start.wrapping_add(chunk_size)
-            };
-            NonceSelectorState::new(chunk_start, chunk_end.wrapping_sub(chunk_start))
+    // Calculate dynamic chunk size
+    let chunk_size = calculate_dynamic_chunk_size(&nonce_range, cores);
+    
+    // Create chunks based on the dynamic chunk size
+    let chunks: Vec<Range<u64>> = (nonce_range.start..nonce_range.end)
+        .step_by(chunk_size as usize)
+        .map(|start| {
+            let end = (start + chunk_size).min(nonce_range.end);
+            start..end
         })
         .collect();
 
-    let results: Vec<_> = (0..cores)
+    let results: Vec<MiningResult> = chunks
         .into_par_iter()
-        .map(|i| {
+        .map(|chunk_range| {
             mine_chunk(
                 challenge,
-                &states[i],
+                chunk_range,
                 cutoff_time,
                 global_best_difficulty,
                 adaptive_min_difficulty,
                 &stop_signal,
-                seed.wrapping_add(i as u64),
             )
         })
         .collect();
 
     stop_signal.store(true, Ordering::Relaxed);
 
-    results.into_iter().reduce(|acc, x| {
-        if x.1 > acc.1 {
-            (x.0, x.1, x.2, acc.3.wrapping_add(x.3))
-        } else {
-            (acc.0, acc.1, acc.2, acc.3.wrapping_add(x.3))
-        }
-    }).unwrap_or_default()
+    results
+        .into_iter()
+        .reduce(|acc, x| {
+            if x.difficulty > acc.difficulty {
+                MiningResult {
+                    nonce: x.nonce,
+                    difficulty: x.difficulty,
+                    hash: x.hash,
+                    nonces_checked: acc.nonces_checked + x.nonces_checked,
+                }
+            } else {
+                MiningResult {
+                    nonce: acc.nonce,
+                    difficulty: acc.difficulty,
+                    hash: acc.hash,
+                    nonces_checked: acc.nonces_checked + x.nonces_checked,
+                }
+            }
+        })
+        .map(|result| (result.nonce, result.difficulty, result.hash, result.nonces_checked))
+        .unwrap_or_default()
 }
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
@@ -306,7 +299,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             let global_best_difficulty = AtomicU32::new(0);
                             let adaptive_min_difficulty = AtomicU32::new(min_difficulty);
 
-                            let (best_nonce, best_difficulty, best_hash, total_nonces_checked) = optimized_mining(
+                            let (best_nonce, best_difficulty, best_hash, total_nonces_checked) = optimized_mining_rayon(
                                 &challenge,
                                 nonce_range,
                                 cutoff_time,
