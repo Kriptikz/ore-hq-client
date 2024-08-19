@@ -1,16 +1,30 @@
-use std::{ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{
+    ops::Range,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
+use base64::prelude::*;
 use clap::{arg, Parser};
 use drillx::equix;
 use futures_util::{SinkExt, StreamExt};
+use rand::prelude::*;
+use rand_chacha::ChaCha20Rng;
+use rayon::prelude::*;
 use solana_sdk::{signature::Keypair, signer::Signer};
-use tokio::sync::{mpsc::UnboundedSender, Mutex};
-use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
-use base64::prelude::*;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        handshake::client::{generate_key, Request},
+        Message,
+    },
+};
 
 #[derive(Debug)]
 pub enum ServerMessage {
-    StartMining([u8; 32], Range<u64>, u64)
+    StartMining([u8; 32], Range<u64>, u64),
 }
 
 #[derive(Debug, Parser)]
@@ -21,7 +35,159 @@ pub struct MineArgs {
         default_value = "1",
         help = "Number of cores to use while mining"
     )]
-    pub cores: u32,
+    pub cores: usize,
+
+    #[arg(
+        long,
+        short,
+        value_name = "EXPECTED_MIN_DIFFICULTY",
+        help = "The expected min difficulty to submit for miner.",
+        default_value = "15"
+    )]
+    pub expected_min_difficulty: u32,
+}
+
+struct NonceSelectorState {
+    chunk_start: u64,
+    chunk_size: u64,
+    current: AtomicU64,
+    last_jump: AtomicU64,
+}
+
+impl NonceSelectorState {
+    fn new(chunk_start: u64, chunk_size: u64) -> Self {
+        Self {
+            chunk_start,
+            chunk_size,
+            current: AtomicU64::new(chunk_start),
+            last_jump: AtomicU64::new(0),
+        }
+    }
+}
+
+fn select_nonce(state: &NonceSelectorState, rng: &mut impl Rng) -> u64 {
+    const JUMP_INTERVAL: u64 = 10000;
+    
+    let mut current = state.current.load(Ordering::Relaxed);
+    if current >= state.chunk_start + state.chunk_size {
+        current = state.chunk_start;
+        state.current.store(current, Ordering::Relaxed);
+    }
+
+    let last_jump = state.last_jump.load(Ordering::Relaxed);
+    if current - last_jump >= JUMP_INTERVAL {
+        current = state.chunk_start + rng.gen_range(0..state.chunk_size);
+        state.current.store(current, Ordering::Relaxed);
+        state.last_jump.store(current, Ordering::Relaxed);
+    }
+
+    let nonce = if rng.gen_bool(0.1) {
+        state.chunk_start + rng.gen_range(0..state.chunk_size)
+    } else {
+        current
+    };
+
+    state.current.fetch_add(1, Ordering::Relaxed);
+
+    nonce
+}
+
+fn mine_chunk(
+    challenge: &[u8; 32],
+    state: &NonceSelectorState,
+    cutoff_time: &AtomicU64,
+    global_best_difficulty: &AtomicU32,
+    adaptive_min_difficulty: &AtomicU32,
+    stop_signal: &AtomicBool,
+    seed: u64,
+) -> (u64, u32, drillx::Hash, u64) {
+    let mut best_result = (0, 0, drillx::Hash::default(), 0);
+    let mut total_nonces_checked = 0;
+    let mut mem = equix::SolverMemory::new();
+    let mut rng = ChaCha20Rng::seed_from_u64(seed);
+
+    loop {
+        if stop_signal.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let nonce = select_nonce(state, &mut rng);
+
+        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= cutoff_time.load(Ordering::Relaxed) {
+            break;
+        }
+
+        if let Ok(hx) = drillx::hash_with_memory(&mut mem, challenge, &nonce.to_le_bytes()) {
+            let difficulty = hx.difficulty();
+            
+            if difficulty > best_result.1 {
+                best_result = (nonce, difficulty, hx, total_nonces_checked + 1);
+                global_best_difficulty.fetch_max(difficulty, Ordering::Release);
+                adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
+            }
+        }
+
+        total_nonces_checked += 1;
+
+        if total_nonces_checked % 1000 == 0 && stop_signal.load(Ordering::Relaxed) {
+            break;
+        }
+    }
+
+    best_result.3 = total_nonces_checked;
+    best_result
+}
+
+fn optimized_mining(
+    challenge: &[u8; 32],
+    nonce_range: Range<u64>,
+    cutoff_time: &AtomicU64,
+    global_best_difficulty: &AtomicU32,
+    adaptive_min_difficulty: &AtomicU32,
+    cores: usize,
+) -> (u64, u32, drillx::Hash, u64) {
+    let stop_signal = AtomicBool::new(false);
+    let range_size = nonce_range.end - nonce_range.start;
+    let chunk_size = range_size / cores as u64;
+    
+    let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+
+    let states: Vec<_> = (0..cores)
+        .map(|i| {
+            let chunk_start = nonce_range.start + (chunk_size * i as u64);
+            let chunk_end = if i == cores - 1 {
+                nonce_range.end
+            } else {
+                chunk_start + chunk_size
+            };
+            NonceSelectorState::new(chunk_start, chunk_end - chunk_start)
+        })
+        .collect();
+
+    let results: Vec<_> = (0..cores)
+        .into_par_iter()
+        .map(|i| {
+            mine_chunk(
+                challenge,
+                &states[i],
+                cutoff_time,
+                global_best_difficulty,
+                adaptive_min_difficulty,
+                &stop_signal,
+                seed + i as u64,
+            )
+        })
+        .collect();
+
+    stop_signal.store(true, Ordering::Relaxed);
+
+    results.into_iter().reduce(|acc, x| {
+        if x.1 > acc.1 {
+            (x.0, x.1, x.2, acc.3 + x.3)
+        } else {
+            (acc.0, acc.1, acc.2, acc.3 + x.3)
+        }
+    }).unwrap_or_default()
 }
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
@@ -33,37 +199,41 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             format!("wss://{}", url)
         };
 
-        if ws_url_str.chars().last().unwrap() != '/' {
+        if !ws_url_str.ends_with('/') {
             ws_url_str.push('/');
         }
 
         let client = reqwest::Client::new();
 
-        let http_prefix = if unsecure {
-            "http".to_string()
-        } else {
-            "https".to_string()
-        };
+        let http_prefix = if unsecure { "http" } else { "https" };
 
-        let timestamp = if let Ok(response) = client.get(format!("{}://{}/timestamp", http_prefix, base_url)).send().await {
-            if let Ok(ts) = response.text().await {
-                if let Ok(ts) = ts.parse::<u64>() {
-                    ts
-                } else {
-                    println!("Server response body for /timestamp failed to parse, contact admin.");
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                    continue;
+        let timestamp = match client.get(format!("{}://{}/timestamp", http_prefix, base_url)).send().await {
+            Ok(response) => {
+                match response.text().await {
+                    Ok(ts) => {
+                        ts.parse::<u64>().unwrap_or_else(|_| {
+                            eprintln!("Server response body for /timestamp failed to parse, contact admin.");
+                            0
+                        })
+                    }
+                    Err(_) => {
+                        eprintln!("Server response body for /timestamp is empty, contact admin.");
+                        0
+                    }
                 }
-            } else {
-                println!("Server response body for /timestamp is empty, contact admin.");
+            }
+            Err(_) => {
+                eprintln!("Server restarting, trying again in 3 seconds...");
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 continue;
             }
-        } else {
-            println!("Server restarting, trying again in 3 seconds...");
+        };
+
+        if timestamp == 0 {
             tokio::time::sleep(Duration::from_secs(3)).await;
             continue;
-        };
+        }
+
         println!("Server Timestamp: {}", timestamp);
 
         let ts_msg = timestamp.to_le_bytes();
@@ -72,8 +242,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
         ws_url_str.push_str(&format!("?timestamp={}", timestamp));
         let url = url::Url::parse(&ws_url_str).expect("Failed to parse server url");
         let host = url.host_str().expect("Invalid host in server url");
-        let threads = args.cores;
-
+        let cores = args.cores;
+        let min_difficulty = args.expected_min_difficulty;
 
         let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
 
@@ -95,7 +265,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 println!("Connected to network!");
 
                 let (mut sender, mut receiver) = ws_stream.split();
-                let (message_sender, mut message_receiver) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
+                let (message_sender, mut message_receiver) = unbounded_channel::<ServerMessage>();
 
                 let receiver_thread = tokio::spawn(async move {
                     while let Some(Ok(message)) = receiver.next().await {
@@ -106,11 +276,14 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 });
 
                 // send Ready message
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_secs();
 
                 let msg = now.to_le_bytes();
                 let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
-                let mut bin_data: Vec<u8> = Vec::new();
+                let mut bin_data: Vec<u8> = Vec::with_capacity(1 + 32 + 8 + sig.len());
                 bin_data.push(0u8);
                 bin_data.extend_from_slice(&key.pubkey().to_bytes());
                 bin_data.extend_from_slice(&msg);
@@ -118,10 +291,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                 let _ = sender.send(Message::Binary(bin_data)).await;
 
-                let sender = Arc::new(Mutex::new(sender));
-
                 // receive messages
-                let message_sender = sender.clone();
                 while let Some(msg) = message_receiver.recv().await {
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
@@ -129,88 +299,28 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Mining starting...");
                             println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
-                            let core_ids = core_affinity::get_core_ids().unwrap();
-                            let nonces_per_thread = 10_000;
-                            let handles = core_ids
-                                .into_iter()
-                                .map(|i| {
-                                    std::thread::spawn({
-                                        let mut memory = equix::SolverMemory::new();
-                                        move || {
-                                            if (i.id as u32).ge(&threads) {
-                                                return None
-                                            } 
+                            
+                            let cutoff_time = AtomicU64::new(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + cutoff);
+                            let global_best_difficulty = AtomicU32::new(0);
+                            let adaptive_min_difficulty = AtomicU32::new(min_difficulty);
 
-                                            let _ = core_affinity::set_for_current(i);
-
-                                            let first_nonce = nonce_range.start + (nonces_per_thread * (i.id as u64));
-                                            let mut nonce = first_nonce;
-                                            let mut best_nonce = nonce;
-                                            let mut best_difficulty = 0;
-                                            let mut best_hash = drillx::Hash::default();
-                                            let mut total_hashes: u64 = 0;
-
-                                            loop {
-                                                // Create hash
-                                                if let Ok(hx) = drillx::hash_with_memory(&mut memory, &challenge, &nonce.to_le_bytes()) {
-                                                    total_hashes += 1;
-                                                    let difficulty = hx.difficulty();
-                                                    if difficulty.gt(&best_difficulty) {
-                                                        best_nonce = nonce;
-                                                        best_difficulty = difficulty;
-                                                        best_hash = hx;
-                                                    }
-                                                }
-
-                                                // Exit if processed nonce range
-                                                if nonce >= nonce_range.end {
-                                                    break;
-                                                }
-
-                                                if nonce % 100 == 0 {
-                                                    if hash_timer.elapsed().as_secs().ge(&cutoff) {
-                                                        if best_difficulty.ge(&8) {
-                                                            break;
-                                                        }
-                                                    }
-                                                } 
-
-
-                                                // Increment nonce
-                                                nonce += 1;
-                                            }
-                                            
-                                            // Return the best nonce
-                                            Some((best_nonce, best_difficulty, best_hash, total_hashes))
-                                        }
-                                    })
-                                })
-                                .collect::<Vec<_>>();
-
-                                // Join handles and return best nonce
-                                let mut best_nonce: u64 = 0;
-                                let mut best_difficulty = 0;
-                                let mut best_hash = drillx::Hash::default();
-                                let mut total_nonces_checked = 0;
-                                for h in handles {
-                                    if let Ok(Some((nonce, difficulty, hash, nonces_checked))) = h.join() {
-                                        total_nonces_checked += nonces_checked;
-                                        if difficulty > best_difficulty {
-                                            best_difficulty = difficulty;
-                                            best_nonce = nonce;
-                                            best_hash = hash;
-                                        }
-                                    }
-                                }
+                            let (best_nonce, best_difficulty, best_hash, total_nonces_checked) = optimized_mining(
+                                &challenge,
+                                nonce_range,
+                                &cutoff_time,
+                                &global_best_difficulty,
+                                &adaptive_min_difficulty,
+                                cores,
+                            );
 
                             let hash_time = hash_timer.elapsed();
 
                             println!("Found best diff: {}", best_difficulty);
                             println!("Processed: {}", total_nonces_checked);
                             println!("Hash time: {:?}", hash_time);
+                            println!("Final adaptive min difficulty: {}", adaptive_min_difficulty.load(Ordering::Relaxed));
 
-
-                            let message_type =  2u8; // 1 u8 - BestSolution Message
+                            let message_type = 2u8; // 2 u8 - BestSolution Message
                             let best_hash_bin = best_hash.d; // 16 u8
                             let best_nonce_bin = best_nonce.to_le_bytes(); // 8 u8
                             
@@ -219,122 +329,129 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
                             let signature = key.sign_message(&hash_nonce_message).to_string().as_bytes().to_vec();
 
-                            let mut bin_data = [0; 57];
-                            bin_data[00..1].copy_from_slice(&message_type.to_le_bytes());
-                            bin_data[01..17].copy_from_slice(&best_hash_bin);
-                            bin_data[17..25].copy_from_slice(&best_nonce_bin);
-                            bin_data[25..57].copy_from_slice(&key.pubkey().to_bytes());
+                            let mut bin_data = Vec::with_capacity(57 + signature.len());
+                            bin_data.extend_from_slice(&message_type.to_le_bytes());
+                            bin_data.extend_from_slice(&best_hash_bin);
+                            bin_data.extend_from_slice(&best_nonce_bin);
+                            bin_data.extend_from_slice(&key.pubkey().to_bytes());
+                            bin_data.extend(signature);
 
-                            let mut bin_vec = bin_data.to_vec();
-                            bin_vec.extend(signature);
-
-                            {
-                                let mut message_sender = message_sender.lock().await;
-                                let _ = message_sender.send(Message::Binary(bin_vec)).await;
-                            }
+                            let _ = sender.send(Message::Binary(bin_data)).await;
 
                             tokio::time::sleep(Duration::from_secs(3)).await;
 
-                            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs();
 
                             let msg = now.to_le_bytes();
                             let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
-                            let mut bin_data: Vec<u8> = Vec::new();
+                            let mut bin_data = Vec::with_capacity(1 + 32 + 8 + sig.len());
                             bin_data.push(0u8);
                             bin_data.extend_from_slice(&key.pubkey().to_bytes());
                             bin_data.extend_from_slice(&msg);
                             bin_data.extend(sig);
-                            {
-                                let mut message_sender = message_sender.lock().await;
 
-                                let _ = message_sender.send(Message::Binary(bin_data)).await;
-                            }
+                            let _ = sender.send(Message::Binary(bin_data)).await;
                         }
                     }
                 }
 
                 let _ = receiver_thread.await;
-            }, 
+            }
             Err(e) => {
                 match e {
                     tokio_tungstenite::tungstenite::Error::Http(e) => {
                         if let Some(body) = e.body() {
-                            println!("Error: {:?}", String::from_utf8(body.to_vec()));
+                            eprintln!("Error: {:?}", String::from_utf8_lossy(body));
                         } else {
-                            println!("Http Error: {:?}", e);
+                            eprintln!("Http Error: {:?}", e);
                         }
-                    }, 
+                    }
                     _ => {
-                        println!("Error: {:?}", e);
+                        eprintln!("Error: {:?}", e);
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(3)).await;
-
             }
         }
     }
 }
 
-fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>) -> ControlFlow<(), ()> {
+use std::ops::ControlFlow;
+
+fn process_message(
+    msg: Message,
+    message_channel: UnboundedSender<ServerMessage>,
+) -> ControlFlow<(), ()> {
     match msg {
-        Message::Text(t)=>{
-            println!("\n>>> Server Message: \n{}\n",t);
-        },
+        Message::Text(t) => {
+            println!("\n>>> Server Message: \n{}\n", t);
+        }
         Message::Binary(b) => {
+            if b.is_empty() {
+                println!("Received empty binary message");
+                return ControlFlow::Continue(());
+            }
             let message_type = b[0];
             match message_type {
-                    0 => {
-                        if b.len() < 49 {
-                            println!("Invalid data for Message StartMining");
-                        } else {
-                            let mut hash_bytes = [0u8; 32];
-                            // extract 256 bytes (32 u8's) from data for hash
-                            let mut b_index = 1;
-                            for i in 0..32 {
-                                hash_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 32;
-
-                            // extract 64 bytes (8 u8's)
-                            let mut cutoff_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                cutoff_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 8;
-                            let cutoff = u64::from_le_bytes(cutoff_bytes);
-
-                            let mut nonce_start_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                nonce_start_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 8;
-                            let nonce_start = u64::from_le_bytes(nonce_start_bytes);
-
-                            let mut nonce_end_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                nonce_end_bytes[i] = b[i + b_index];
-                            }
-                            let nonce_end = u64::from_le_bytes(nonce_end_bytes);
-
-                            let msg = ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
-
-                            let _ = message_channel.send(msg);
+                0 => {
+                    if b.len() < 57 {
+                        println!("Invalid data for Message StartMining");
+                    } else {
+                        let mut hash_bytes = [0u8; 32];
+                        // extract 256 bytes (32 u8's) from data for hash
+                        let mut b_index = 1;
+                        for i in 0..32 {
+                            hash_bytes[i] = b[i + b_index];
                         }
+                        b_index += 32;
 
-                    },
-                    _ => {
-                        println!("Failed to parse server message type");
+                        // extract 64 bytes (8 u8's)
+                        let mut cutoff_bytes = [0u8; 8];
+                        for i in 0..8 {
+                            cutoff_bytes[i] = b[i + b_index];
+                        }
+                        b_index += 8;
+                        let cutoff = u64::from_le_bytes(cutoff_bytes);
+
+                        let mut nonce_start_bytes = [0u8; 8];
+                        for i in 0..8 {
+                            nonce_start_bytes[i] = b[i + b_index];
+                        }
+                        b_index += 8;
+                        let nonce_start = u64::from_le_bytes(nonce_start_bytes);
+
+                        let mut nonce_end_bytes = [0u8; 8];
+                        for i in 0..8 {
+                            nonce_end_bytes[i] = b[i + b_index];
+                        }
+                        let nonce_end = u64::from_le_bytes(nonce_end_bytes);
+
+                        let msg = ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
+
+                        let _ = message_channel.send(msg);
                     }
                 }
-
-        },
-        Message::Ping(v) => {println!("Got Ping: {:?}", v);}, 
-        Message::Pong(v) => {println!("Got Pong: {:?}", v);}, 
+                _ => {
+                    println!("Failed to parse server message type");
+                }
+            }
+        }
+        Message::Ping(v) => {
+            println!("Got Ping: {:?}", v);
+        }
+        Message::Pong(v) => {
+            println!("Got Pong: {:?}", v);
+        }
         Message::Close(v) => {
             println!("Got Close: {:?}", v);
             return ControlFlow::Break(());
-        }, 
-        _ => {println!("Got invalid message data");}
+        }
+        _ => {
+            println!("Got invalid message data");
+        }
     }
 
     ControlFlow::Continue(())
