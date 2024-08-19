@@ -8,12 +8,10 @@ use base64::prelude::*;
 use clap::{arg, Parser};
 use drillx::equix;
 use futures_util::{SinkExt, StreamExt};
-use rand::prelude::*;
-use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
 use solana_sdk::{signature::Keypair, signer::Signer};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{
@@ -21,16 +19,13 @@ use tokio_tungstenite::{
         Message,
     },
 };
+use std::sync::Once;
+
+static INIT_RAYON: Once = Once::new();
 
 // Constants for tuning performance
-const MIN_CHUNK_SIZE: u64 = 1_000_000;
-const MAX_CHUNK_SIZE: u64 = 10_000_000;
-
-// Thread-local storage for frequently accessed data
-thread_local! {
-    static SOLVER_MEMORY: std::cell::RefCell<equix::SolverMemory> = std::cell::RefCell::new(equix::SolverMemory::new());
-    static RNG: std::cell::RefCell<ChaCha20Rng> = std::cell::RefCell::new(ChaCha20Rng::from_entropy());
-}
+const MIN_CHUNK_SIZE: u64 = 3_000_000;
+const MAX_CHUNK_SIZE: u64 = 30_000_000;
 
 #[derive(Debug)]
 pub enum ServerMessage {
@@ -64,9 +59,20 @@ struct MiningResult {
     nonces_checked: u64,
 }
 
+impl MiningResult {
+    fn new() -> Self {
+        MiningResult {
+            nonce: 0,
+            difficulty: 0,
+            hash: drillx::Hash::default(),  // Assuming drillx::Hash implements Default
+            nonces_checked: 0,
+        }
+    }
+}
+
 fn calculate_dynamic_chunk_size(nonce_range: &Range<u64>, threads: usize) -> u64 {
     let range_size = nonce_range.end - nonce_range.start;
-    let chunks_per_thread = 4; // Adjust this value to fine-tune the number of chunks per thread
+    let chunks_per_thread = 5;
     let ideal_chunk_size = range_size / (threads * chunks_per_thread) as u64;
     
     ideal_chunk_size.clamp(MIN_CHUNK_SIZE, MAX_CHUNK_SIZE)
@@ -80,46 +86,39 @@ fn mine_chunk(
     adaptive_min_difficulty: &AtomicU32,
     stop_signal: &AtomicBool,
 ) -> MiningResult {
-    let mut best_result = MiningResult {
-        nonce: 0,
-        difficulty: 0,
-        hash: drillx::Hash::default(),
-        nonces_checked: 0,
-    };
+    let mut best_result = MiningResult::new();
+    let mut mem = equix::SolverMemory::new();
 
-    // Use thread-local storage for SolverMemory
-    SOLVER_MEMORY.with(|mem| {
-        for nonce in nonce_range {
-            if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= cutoff_time {
-                break;
-            }
+    for nonce in nonce_range {
+        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= cutoff_time {
+            break;
+        }
 
-            if stop_signal.load(Ordering::Relaxed) {
-                break;
-            }
+        if stop_signal.load(Ordering::Relaxed) {
+            break;
+        }
 
-            if let Ok(hx) = drillx::hash_with_memory(&mut mem.borrow_mut(), challenge, &nonce.to_le_bytes()) {
-                let difficulty = hx.difficulty();
-                
-                if difficulty > best_result.difficulty {
-                    best_result = MiningResult {
-                        nonce,
-                        difficulty,
-                        hash: hx,
-                        nonces_checked: best_result.nonces_checked + 1,
-                    };
-                    let _ = global_best_difficulty.fetch_max(difficulty, Ordering::Release);
-                    let _ = adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
-                }
-            }
-
-            best_result.nonces_checked += 1;
-
-            if best_result.nonces_checked % 10_000 == 0 && stop_signal.load(Ordering::Relaxed) {
-                break;
+        if let Ok(hx) = drillx::hash_with_memory(&mut mem, challenge, &nonce.to_le_bytes()) {
+            let difficulty = hx.difficulty();
+            
+            if difficulty > best_result.difficulty {
+                best_result = MiningResult {
+                    nonce,
+                    difficulty,
+                    hash: hx,
+                    nonces_checked: best_result.nonces_checked + 1,
+                };
+                let _ = global_best_difficulty.fetch_max(difficulty, Ordering::Release);
+                let _ = adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
             }
         }
-    });
+
+        best_result.nonces_checked += 1;
+
+        if best_result.nonces_checked % 10_000 == 0 && stop_signal.load(Ordering::Relaxed) {
+            break;
+        }
+    }
 
     best_result
 }
@@ -134,44 +133,53 @@ fn optimized_mining_rayon(
 ) -> (u64, u32, drillx::Hash, u64) {
     let stop_signal = Arc::new(AtomicBool::new(false));
     
-    // Calculate dynamic chunk size
+    // Initialize Rayon thread pool only once
+    INIT_RAYON.call_once(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(cores)
+            .build_global()
+            .expect("Failed to initialize global thread pool");
+    });
+    
     let chunk_size = calculate_dynamic_chunk_size(&nonce_range, cores);
     
-    // Create chunks based on the dynamic chunk size
-    let chunks: Vec<Range<u64>> = (nonce_range.start..nonce_range.end)
-        .step_by(chunk_size as usize)
-        .map(|start| {
-            let end = (start + chunk_size).min(nonce_range.end);
-            start..end
-        })
-        .collect();
-
-    let results: Vec<MiningResult> = chunks
-        .into_par_iter()
-        .map(|chunk_range| {
-            mine_chunk(
+    let results: Vec<MiningResult> = (0..cores).into_par_iter().map(|core_id| {
+        let core_range_size = (nonce_range.end - nonce_range.start) / cores as u64;
+        let core_start = nonce_range.start + core_id as u64 * core_range_size;
+        let core_end = if core_id == cores - 1 { nonce_range.end } else { core_start + core_range_size };
+        
+        let mut core_best = MiningResult::new();
+        for chunk_start in (core_start..core_end).step_by(chunk_size as usize) {
+            let chunk_end = (chunk_start + chunk_size).min(core_end);
+            let chunk_result = mine_chunk(
                 challenge,
-                chunk_range,
+                chunk_start..chunk_end,
                 cutoff_time,
                 global_best_difficulty,
                 adaptive_min_difficulty,
                 &stop_signal,
-            )
-        })
-        .collect();
+            );
+            
+            // Update nonces_checked before potentially moving chunk_result
+            core_best.nonces_checked += chunk_result.nonces_checked;
+            
+            if chunk_result.difficulty > core_best.difficulty {
+                core_best = chunk_result;
+            }
+            
+            if stop_signal.load(Ordering::Relaxed) {
+                break;
+            }
+        }
+        core_best
+    }).collect();
 
     stop_signal.store(true, Ordering::Relaxed);
 
-    results
-        .into_iter()
+    results.into_iter()
         .reduce(|acc, x| {
             if x.difficulty > acc.difficulty {
-                MiningResult {
-                    nonce: x.nonce,
-                    difficulty: x.difficulty,
-                    hash: x.hash,
-                    nonces_checked: acc.nonces_checked + x.nonces_checked,
-                }
+                x
             } else {
                 MiningResult {
                     nonce: acc.nonce,
@@ -182,10 +190,11 @@ fn optimized_mining_rayon(
             }
         })
         .map(|result| (result.nonce, result.difficulty, result.hash, result.nonces_checked))
-        .unwrap_or_default()
+        .unwrap_or_else(|| (0, 0, drillx::Hash::default(), 0))
 }
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
+    let cores = args.cores;
     loop {
         let base_url = url.clone();
         let mut ws_url_str = if unsecure {
@@ -305,7 +314,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 cutoff_time,
                                 &global_best_difficulty,
                                 &adaptive_min_difficulty,
-                                cores,
+                                cores,  // Use the same `cores` value for all mining operations
                             );
 
                             let hash_time = hash_timer.elapsed();
@@ -334,6 +343,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             let _ = sender.send(Message::Binary(bin_data)).await;
 
                             tokio::time::sleep(Duration::from_secs(3)).await;
+
 
                             let now = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
