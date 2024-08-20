@@ -944,9 +944,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "drillx"
-version = "2.0.1"
-source = "git+https://github.com/Kriptikz/drillx.git#58d248ea1ed4e08286e32b69685b96d7b7aeb245"
+name = "drillx_2"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af4e3aca4ae86ab0d0050f50b322adab7c0e93904896a5c60bdb33324ea1d36a"
 dependencies = [
  "equix",
  "serde",
@@ -1873,7 +1874,7 @@ dependencies = [
  "array-const-fn-init",
  "bytemuck",
  "const-crypto",
- "drillx 2.0.0",
+ "drillx",
  "mpl-token-metadata",
  "num_enum",
  "ore-utils",
@@ -1893,7 +1894,7 @@ dependencies = [
  "clap",
  "core_affinity",
  "crossbeam",
- "drillx 2.0.1",
+ "drillx_2",
  "futures-util",
  "ore-api",
  "ore-utils",

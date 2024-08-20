@@ -14,7 +14,7 @@ clap = { version = "4.5.13", features = ["derive"] }
 core_affinity = "0.8.1"
 ore-api = "2.1.0"
 ore-utils = "2.1.0"
-drillx = { git = "https://github.com/Kriptikz/drillx.git" }
+drillx_2 = "1.0.0"
 futures-util = "0.3.30"
 reqwest = "^0.11.0"
 rpassword = "7.3.1"

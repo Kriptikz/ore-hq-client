@@ -55,7 +55,7 @@ pub struct MineArgs {
 struct MiningResult {
     nonce: u64,
     difficulty: u32,
-    hash: drillx::Hash,
+    hash: drillx_2::Hash,
     nonces_checked: u64,
 }
 
@@ -64,7 +64,7 @@ impl MiningResult {
         MiningResult {
             nonce: 0,
             difficulty: 0,
-            hash: drillx::Hash::default(),  // Assuming drillx::Hash implements Default
+            hash: drillx_2::Hash::default(),  // Assuming drillx::Hash implements Default
             nonces_checked: 0,
         }
     }
@@ -85,7 +85,7 @@ fn optimized_mining_rayon(
     global_best_difficulty: &AtomicU32,
     adaptive_min_difficulty: &AtomicU32,
     cores: usize,
-) -> (u64, u32, drillx::Hash, u64) {
+) -> (u64, u32, drillx_2::Hash, u64) {
     let stop_signal = Arc::new(AtomicBool::new(false));
     let total_nonces_checked = Arc::new(AtomicU64::new(0));
     
@@ -121,7 +121,7 @@ fn optimized_mining_rayon(
 
                 local_nonces_checked += 1;
                 
-                if let Ok(hx) = drillx::hash(challenge, &nonce.to_le_bytes()) {
+                if let Ok(hx) = drillx_2::hash(challenge, &nonce.to_le_bytes()) {
                     let difficulty = hx.difficulty();
                     
                     if difficulty > core_best.difficulty {
