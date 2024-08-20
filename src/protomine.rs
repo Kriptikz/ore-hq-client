@@ -6,7 +6,6 @@ use std::{
 
 use base64::prelude::*;
 use clap::{arg, Parser};
-use drillx::equix;
 use futures_util::{SinkExt, StreamExt};
 use rayon::prelude::*;
 use solana_sdk::{signature::Keypair, signer::Signer};
@@ -20,7 +19,7 @@ use tokio_tungstenite::{
     },
 };
 use std::sync::Once;
-use std::sync::atomic::{AtomicU64};
+use std::sync::atomic::AtomicU64;
 
 static INIT_RAYON: Once = Once::new();
 
@@ -265,7 +264,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
                             println!("Received start mining message!");
-                            println!("Mining starting...");
+                            println!("Mining starting (Using Protomine)...");
                             println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
                             
@@ -287,6 +286,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Found best diff: {}", best_difficulty);
                             println!("Processed: {}", total_nonces_checked);
                             println!("Hash time: {:?}", hash_time);
+                            println!("Hashpower: {:?} H/s", total_nonces_checked.saturating_div(hash_time.as_secs()));
                             println!("Final adaptive min difficulty: {}", adaptive_min_difficulty.load(Ordering::Relaxed));
 
                             let message_type = 2u8; // 2 u8 - BestSolution Message
