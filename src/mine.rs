@@ -208,6 +208,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Found best diff: {}", best_difficulty);
                             println!("Processed: {}", total_nonces_checked);
                             println!("Hash time: {:?}", hash_time);
+                            println!("Hashpower: {:?} H/s", total_nonces_checked.saturating_div(hash_time.as_secs()));
 
 
                             let message_type =  2u8; // 1 u8 - BestSolution Message
