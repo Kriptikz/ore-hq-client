@@ -26,7 +26,6 @@ static INIT_RAYON: Once = Once::new();
 // Constants for tuning performance
 const MIN_CHUNK_SIZE: u64 = 3_000_000;
 const MAX_CHUNK_SIZE: u64 = 30_000_000;
-const NONCES_PER_THREAD: u64 = 10_000;
 
 #[derive(Debug)]
 pub enum ServerMessage {
@@ -112,9 +111,7 @@ fn optimized_mining_rayon(
 
         'outer: for chunk_start in (core_start..core_end).step_by(chunk_size as usize) {
             let chunk_end = (chunk_start + chunk_size).min(core_end);
-            let mut nonce = chunk_start;
-
-            while nonce < chunk_end {
+            for nonce in chunk_start..chunk_end {
                 if start_time.elapsed().as_secs() >= cutoff_time {
                     break 'outer;
                 }
@@ -123,31 +120,23 @@ fn optimized_mining_rayon(
                     break 'outer;
                 }
 
-                for _ in 0..NONCES_PER_THREAD {
-                    if nonce >= chunk_end {
-                        break;
+                for hx in drillx_2::get_hashes_with_memory(&mut memory, challenge, &nonce.to_le_bytes()) {
+                    local_nonces_checked += 1;
+                    let difficulty = hx.difficulty();
+                    
+                    if difficulty > core_best.difficulty {
+                        core_best = MiningResult {
+                            nonce,
+                            difficulty,
+                            hash: hx,
+                            nonces_checked: local_nonces_checked,
+                        };
+                        let _ = global_best_difficulty.fetch_max(difficulty, Ordering::Release);
+                        let _ = adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
                     }
-
-                    for hx in drillx_2::get_hashes_with_memory(&mut memory, challenge, &nonce.to_le_bytes()) {
-                        local_nonces_checked += 1;
-                        let difficulty = hx.difficulty();
-                        
-                        if difficulty > core_best.difficulty {
-                            core_best = MiningResult {
-                                nonce,
-                                difficulty,
-                                hash: hx,
-                                nonces_checked: local_nonces_checked,
-                            };
-                            let _ = global_best_difficulty.fetch_max(difficulty, Ordering::Release);
-                            let _ = adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
-                        }
-                    }
-
-                    nonce += 1;
                 }
 
-                if start_time.elapsed().as_secs() >= cutoff_time {
+                if nonce % 100 == 0 && start_time.elapsed().as_secs() >= cutoff_time {
                     if core_best.difficulty >= 8 {
                         break 'outer;
                     }
