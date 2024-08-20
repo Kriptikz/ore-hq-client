@@ -944,6 +944,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "drillx"
+version = "2.0.1"
+source = "git+https://github.com/Kriptikz/drillx.git#58d248ea1ed4e08286e32b69685b96d7b7aeb245"
+dependencies = [
+ "equix",
+ "serde",
+ "sha3 0.10.8",
+ "strum",
+]
+
+[[package]]
 name = "dynasm"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1862,7 +1873,7 @@ dependencies = [
  "array-const-fn-init",
  "bytemuck",
  "const-crypto",
- "drillx",
+ "drillx 2.0.0",
  "mpl-token-metadata",
  "num_enum",
  "ore-utils",
@@ -1882,7 +1893,7 @@ dependencies = [
  "clap",
  "core_affinity",
  "crossbeam",
- "drillx",
+ "drillx 2.0.1",
  "futures-util",
  "ore-api",
  "ore-utils",
