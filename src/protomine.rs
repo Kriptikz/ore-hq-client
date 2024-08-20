@@ -1,5 +1,5 @@
 use std::{
-    ops::{Range,ControlFlow}
+    ops::{Range,ControlFlow},
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -172,6 +172,202 @@ fn optimized_mining_rayon(
         .unwrap_or_else(MiningResult::new);
 
     (best_result.nonce, best_result.difficulty, best_result.hash, total_nonces_checked.load(Ordering::Relaxed))
+}
+
+pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
+    let mut cores = args.cores;
+    let max_cores = core_affinity::get_core_ids().unwrap().len();
+    if cores > max_cores {
+        cores = max_cores
+    }
+
+    loop {
+        let base_url = url.clone();
+        let mut ws_url_str = if unsecure {
+            format!("ws://{}", url)
+        } else {
+            format!("wss://{}", url)
+        };
+
+        if !ws_url_str.ends_with('/') {
+            ws_url_str.push('/');
+        }
+
+        let client = reqwest::Client::new();
+
+        let http_prefix = if unsecure { "http" } else { "https" };
+
+        let timestamp = match client.get(format!("{}://{}/timestamp", http_prefix, base_url)).send().await {
+            Ok(response) => {
+                match response.text().await {
+                    Ok(ts) => {
+                        match ts.parse::<u64>() {
+                            Ok(timestamp) => timestamp,
+                            Err(_) => {
+                                eprintln!("Server response body for /timestamp failed to parse, contact admin.");
+                                tokio::time::sleep(Duration::from_secs(3)).await;
+                                continue;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        eprintln!("Server response body for /timestamp is empty, contact admin.");
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                        continue;
+                    }
+                }
+            }
+            Err(_) => {
+                eprintln!("Server restarting, trying again in 3 seconds...");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                continue;
+            }
+        };
+
+        println!("Server Timestamp: {}", timestamp);
+
+        let ts_msg = timestamp.to_le_bytes();
+        let sig = key.sign_message(&ts_msg);
+
+        ws_url_str.push_str(&format!("?timestamp={}", timestamp));
+        let url = url::Url::parse(&ws_url_str).expect("Failed to parse server url");
+        let host = url.host_str().expect("Invalid host in server url");
+        let min_difficulty = args.expected_min_difficulty;
+
+        let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
+
+        println!("Connecting to server...");
+        let request = Request::builder()
+            .method("GET")
+            .uri(url.to_string())
+            .header("Sec-Websocket-Key", generate_key())
+            .header("Host", host)
+            .header("Upgrade", "websocket")
+            .header("Connection", "upgrade")
+            .header("Sec-Websocket-Version", "13")
+            .header("Authorization", format!("Basic {}", auth))
+            .body(())
+            .unwrap();
+
+        match connect_async(request).await {
+            Ok((ws_stream, _)) => {
+                println!("Connected to network!");
+
+                let (mut sender, mut receiver) = ws_stream.split();
+                let (message_sender, mut message_receiver) = unbounded_channel::<ServerMessage>();
+
+                let receiver_thread = tokio::spawn(async move {
+                    while let Some(Ok(message)) = receiver.next().await {
+                        if process_message(message, message_sender.clone()).is_break() {
+                            break;
+                        }
+                    }
+                });
+
+                // send Ready message
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_secs();
+
+                let msg = now.to_le_bytes();
+                let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
+                let mut bin_data: Vec<u8> = Vec::with_capacity(1 + 32 + 8 + sig.len());
+                bin_data.push(0u8);
+                bin_data.extend_from_slice(&key.pubkey().to_bytes());
+                bin_data.extend_from_slice(&msg);
+                bin_data.extend(sig);
+
+                let _ = sender.send(Message::Binary(bin_data)).await;
+
+                // receive messages
+                while let Some(msg) = message_receiver.recv().await {
+                    match msg {
+                        ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
+                            println!("Received start mining message!");
+                            println!("Mining starting (Using Protomine)...");
+                            println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
+                            let hash_timer = Instant::now();
+                            
+                            let cutoff_time = cutoff;  // Use the provided cutoff directly
+                            let global_best_difficulty = AtomicU32::new(0);
+                            let adaptive_min_difficulty = AtomicU32::new(min_difficulty);
+
+                            let (best_nonce, best_difficulty, best_hash, total_nonces_checked) = optimized_mining_rayon(
+                                &challenge,
+                                nonce_range,
+                                cutoff_time,
+                                &global_best_difficulty,
+                                &adaptive_min_difficulty,
+                                cores,
+                            );
+
+                            let hash_time = hash_timer.elapsed();
+
+                            println!("Found best diff: {}", best_difficulty);
+                            println!("Processed: {}", total_nonces_checked);
+                            println!("Hash time: {:?}", hash_time);
+                            println!("Hashpower: {:?} H/s", total_nonces_checked.saturating_div(hash_time.as_secs()));
+                            println!("Final adaptive min difficulty: {}", adaptive_min_difficulty.load(Ordering::Relaxed));
+
+                            let message_type = 2u8; // 2 u8 - BestSolution Message
+                            let best_hash_bin = best_hash.d; // 16 u8
+                            let best_nonce_bin = best_nonce.to_le_bytes(); // 8 u8
+                            
+                            let mut hash_nonce_message = [0; 24];
+                            hash_nonce_message[0..16].copy_from_slice(&best_hash_bin);
+                            hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
+                            let signature = key.sign_message(&hash_nonce_message).to_string().as_bytes().to_vec();
+
+                            let mut bin_data = Vec::with_capacity(57 + signature.len());
+                            bin_data.extend_from_slice(&message_type.to_le_bytes());
+                            bin_data.extend_from_slice(&best_hash_bin);
+                            bin_data.extend_from_slice(&best_nonce_bin);
+                            bin_data.extend_from_slice(&key.pubkey().to_bytes());
+                            bin_data.extend(signature);
+
+                            let _ = sender.send(Message::Binary(bin_data)).await;
+
+                            tokio::time::sleep(Duration::from_secs(3)).await;
+
+
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs();
+
+                            let msg = now.to_le_bytes();
+                            let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
+                            let mut bin_data = Vec::with_capacity(1 + 32 + 8 + sig.len());
+                            bin_data.push(0u8);
+                            bin_data.extend_from_slice(&key.pubkey().to_bytes());
+                            bin_data.extend_from_slice(&msg);
+                            bin_data.extend(sig);
+
+                            let _ = sender.send(Message::Binary(bin_data)).await;
+                        }
+                    }
+                }
+
+                let _ = receiver_thread.await;
+            }
+            Err(e) => {
+                match e {
+                    tokio_tungstenite::tungstenite::Error::Http(e) => {
+                        if let Some(body) = e.body() {
+                            eprintln!("Error: {:?}", String::from_utf8_lossy(body));
+                        } else {
+                            eprintln!("Http Error: {:?}", e);
+                        }
+                    }
+                    _ => {
+                        eprintln!("Error: {:?}", e);
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        }
+    }
 }
 
 fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>) -> ControlFlow<(), ()> {
