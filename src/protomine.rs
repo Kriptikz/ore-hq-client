@@ -158,7 +158,12 @@ fn optimized_mining_rayon(
 }
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
-    let cores = args.cores;
+    let mut cores = args.cores;
+    let max_cores = core_affinity::get_core_ids().unwrap().len();
+    if cores > max_cores {
+        cores = max_cores
+    }
+
     loop {
         let base_url = url.clone();
         let mut ws_url_str = if unsecure {
@@ -210,7 +215,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
         ws_url_str.push_str(&format!("?timestamp={}", timestamp));
         let url = url::Url::parse(&ws_url_str).expect("Failed to parse server url");
         let host = url.host_str().expect("Invalid host in server url");
-        let cores = args.cores;
         let min_difficulty = args.expected_min_difficulty;
 
         let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
