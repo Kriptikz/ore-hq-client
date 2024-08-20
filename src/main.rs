@@ -2,11 +2,11 @@ use claim::ClaimArgs;
 use solana_sdk::signature::read_keypair_file;
 use clap::{Parser, Subcommand};
 
-use mine::MineArgs;
+use protomine::MineArgs;
 use signup::signup;
 
 mod signup;
-mod mine;
+mod protomine;
 mod claim;
 mod balance;
 mod rewards;
@@ -46,8 +46,10 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    #[command(about = "Connect to pool and start mining.")]
+    #[command(about = "Connect to pool and start mining. (Default Implementation)")]
     Mine(MineArgs),
+    #[command(about = "Connect to pool and start mining. (Protomine Implementation)")]
+    Protomine(MineArgs),
     #[command(about = "Transfer sol to the pool authority to sign up.")]
     Signup,
     #[command(about = "Claim rewards.")]
@@ -70,7 +72,10 @@ async fn main() {
     let key = read_keypair_file(args.keypair.clone()).expect(&format!("Failed to load keypair from file: {}", args.keypair));
     match args.command {
         Commands::Mine(args) => {
-            mine::mine(args, key, base_url, unsecure_conn).await;
+            protomine::mine(args, key, base_url, unsecure_conn).await;
+        },
+        Commands::Protomine(args) => {
+            protomine::mine(args, key, base_url, unsecure_conn).await;
         },
         Commands::Signup => {
             signup(base_url, key, unsecure_conn).await;
