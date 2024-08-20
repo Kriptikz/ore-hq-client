@@ -48,7 +48,7 @@ pub struct MineArgs {
         short,
         value_name = "EXPECTED_MIN_DIFFICULTY",
         help = "The expected min difficulty to submit for miner.",
-        default_value = "15"
+        default_value = "17"
     )]
     pub expected_min_difficulty: u32,
 }
