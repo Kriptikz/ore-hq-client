@@ -27,3 +27,16 @@ rayon = "1.10"
 crossbeam = "0.8.0"
 rand = "0.8.4"
 rand_chacha = "0.3.0"
+
+[profile.release]
+opt-level = 3     # Full optimisations
+codegen-units = 1 # Better optimization with fewer codegen units
+lto = true        # Enable Link Time Optimization (LTO)
+debug = false     # Disable debug info to reduce binary size
+panic = 'abort'   # Reduces the binary size further by not including unwinding information
+rpath = false
+incremental = false
+overflow-checks = false
+
+[build]
+rustflags = ["-C", "target-cpu=native"]
