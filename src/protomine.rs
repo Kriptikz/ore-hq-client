@@ -1,5 +1,5 @@
 use std::{
-    ops::{Range,ControlFlow},
+    ops::{Range, ControlFlow},
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -9,7 +9,7 @@ use clap::{arg, Parser};
 use futures_util::{SinkExt, StreamExt};
 use rayon::prelude::*;
 use solana_sdk::{signature::Keypair, signer::Signer};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_tungstenite::{
     connect_async,
@@ -41,15 +41,6 @@ pub struct MineArgs {
         help = "Number of cores to use while mining"
     )]
     pub cores: usize,
-
-    #[arg(
-        long,
-        short,
-        value_name = "EXPECTED_MIN_DIFFICULTY",
-        help = "The expected min difficulty to submit for miner.",
-        default_value = "17"
-    )]
-    pub expected_min_difficulty: u32,
 }
 
 struct MiningResult {
@@ -82,8 +73,6 @@ fn optimized_mining_rayon(
     challenge: &[u8; 32],
     nonce_range: Range<u64>,
     cutoff_time: u64,
-    global_best_difficulty: &AtomicU32,
-    adaptive_min_difficulty: &AtomicU32,
     cores: usize,
 ) -> (u64, u32, drillx_2::Hash, u64) {
     let stop_signal = Arc::new(AtomicBool::new(false));
@@ -131,8 +120,6 @@ fn optimized_mining_rayon(
                             hash: hx,
                             nonces_checked: local_nonces_checked,
                         };
-                        let _ = global_best_difficulty.fetch_max(difficulty, Ordering::Release);
-                        let _ = adaptive_min_difficulty.fetch_max(difficulty.saturating_sub(2), Ordering::Relaxed);
                     }
                 }
 
@@ -221,7 +208,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
         ws_url_str.push_str(&format!("?timestamp={}", timestamp));
         let url = url::Url::parse(&ws_url_str).expect("Failed to parse server url");
         let host = url.host_str().expect("Invalid host in server url");
-        let min_difficulty = args.expected_min_difficulty;
 
         let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
 
@@ -279,15 +265,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             let hash_timer = Instant::now();
                             
                             let cutoff_time = cutoff;  // Use the provided cutoff directly
-                            let global_best_difficulty = AtomicU32::new(0);
-                            let adaptive_min_difficulty = AtomicU32::new(min_difficulty);
 
                             let (best_nonce, best_difficulty, best_hash, total_nonces_checked) = optimized_mining_rayon(
                                 &challenge,
                                 nonce_range,
                                 cutoff_time,
-                                &global_best_difficulty,
-                                &adaptive_min_difficulty,
                                 cores,
                             );
 
@@ -297,7 +279,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Processed: {}", total_nonces_checked);
                             println!("Hash time: {:?}", hash_time);
                             println!("Hashpower: {:?} H/s", total_nonces_checked.saturating_div(hash_time.as_secs()));
-                            println!("Final adaptive min difficulty: {}", adaptive_min_difficulty.load(Ordering::Relaxed));
 
                             let message_type = 2u8; // 2 u8 - BestSolution Message
                             let best_hash_bin = best_hash.d; // 16 u8
