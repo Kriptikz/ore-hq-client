@@ -92,7 +92,7 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
 
     let selection = match &args.command {
         Some(_) => None, // Execute the command passed as argument
-        None => Select::new("Welcome to Ore HQ Client, what would you like to do?", options).prompt().ok(),
+        None => Select::new("Welcome to Ec1ipse Ore HQ Client, what would you like to do?", options).prompt().ok(),
     };
 
     if selection == Some("Exit") {
@@ -100,7 +100,7 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if selection == Some("Help") {
-        println!("This is a command line tool to interact with the ORE mining pool. Use the options provided to mine, check balances, claim rewards, or sign up.");
+        println!("This is a command line tool to interact with the Ec1ipse Ore Mining Pool. Use the options provided to mine, check balances, claim rewards, or sign up.");
         return Ok(());
     }
 
