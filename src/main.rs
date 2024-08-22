@@ -160,7 +160,7 @@ async fn run_command(
             protomine::mine(args, key, base_url, unsecure_conn).await;
         },
         Some(Commands::Signup) => {
-            let confirm_signup = Confirm::new("Do you want to sign up to the pool?")
+            let confirm_signup = Confirm::new("Are you sure you want to sign up to the pool?")
                 .prompt()
                 .unwrap_or(false);
 
@@ -171,7 +171,7 @@ async fn run_command(
             }
         },
         Some(Commands::Claim(args)) => {
-            let confirm_claim = Confirm::new(&format!("Do you want to claim {} rewards?", args.amount))
+            let confirm_claim = Confirm::new(&format!("Are you sure you want to claim {} rewards?", args.amount))
                 .prompt()
                 .unwrap_or(false);
 
