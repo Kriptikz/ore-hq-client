@@ -27,6 +27,10 @@ rayon = "1.10"
 crossbeam = "0.8.0"
 rand = "0.8.4"
 rand_chacha = "0.3.0"
+inquire = "0.7.5"
+home = "0.5.9"
+dirs = "5.0.1"
+colored = "2.0"
 
 [profile.release]
 opt-level = 3     # Full optimisations
