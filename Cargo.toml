@@ -31,6 +31,7 @@ inquire = "0.7.5"
 home = "0.5.9"
 dirs = "5.0.1"
 colored = "2.0"
+indicatif = "0.17"
 
 [profile.release]
 opt-level = 3     # Full optimisations

@@ -5,7 +5,7 @@ use std::{
 };
 
 use base64::prelude::*;
-use clap::{arg, Parser};
+use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use rayon::prelude::*;
 use solana_sdk::{signature::Keypair, signer::Signer};
@@ -36,11 +36,11 @@ pub enum ServerMessage {
 pub struct MineArgs {
     #[arg(
         long,
-        value_name = "CORES",
+        value_name = "threads",
         default_value = "1",
-        help = "Number of cores to use while mining"
+        help = "Number of threads to use while mining"
     )]
-    pub cores: usize,
+    pub threads: usize,
 }
 
 struct MiningResult {
@@ -73,7 +73,7 @@ fn optimized_mining_rayon(
     challenge: &[u8; 32],
     nonce_range: Range<u64>,
     cutoff_time: u64,
-    cores: usize,
+    threads: usize,
 ) -> (u64, u32, drillx_2::Hash, u64) {
     let stop_signal = Arc::new(AtomicBool::new(false));
     let total_nonces_checked = Arc::new(AtomicU64::new(0));
@@ -81,19 +81,19 @@ fn optimized_mining_rayon(
     // Initialize Rayon thread pool only once
     INIT_RAYON.call_once(|| {
         rayon::ThreadPoolBuilder::new()
-            .num_threads(cores)
+            .num_threads(threads)
             .build_global()
             .expect("Failed to initialize global thread pool");
     });
     
-    let chunk_size = calculate_dynamic_chunk_size(&nonce_range, cores);
+    let chunk_size = calculate_dynamic_chunk_size(&nonce_range, threads);
     let start_time = Instant::now();
     
-    let results: Vec<MiningResult> = (0..cores).into_par_iter().map(|core_id| {
+    let results: Vec<MiningResult> = (0..threads).into_par_iter().map(|core_id| {
         let mut memory = equix::SolverMemory::new();
-        let core_range_size = (nonce_range.end - nonce_range.start) / cores as u64;
+        let core_range_size = (nonce_range.end - nonce_range.start) / threads as u64;
         let core_start = nonce_range.start + core_id as u64 * core_range_size;
-        let core_end = if core_id == cores - 1 { nonce_range.end } else { core_start + core_range_size };
+        let core_end = if core_id == threads - 1 { nonce_range.end } else { core_start + core_range_size };
         
         let mut core_best = MiningResult::new();
         let mut local_nonces_checked = 0;
@@ -150,11 +150,11 @@ fn optimized_mining_rayon(
     (best_result.nonce, best_result.difficulty, best_result.hash, total_nonces_checked.load(Ordering::Relaxed))
 }
 
-pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
-    let mut cores = args.cores;
-    let max_cores = core_affinity::get_core_ids().unwrap().len();
-    if cores > max_cores {
-        cores = max_cores
+pub async fn protomine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
+    let mut threads = args.threads;
+    let max_threads = core_affinity::get_core_ids().unwrap().len();
+    if threads > max_threads {
+        threads = max_threads;
     }
 
     loop {
@@ -270,7 +270,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 &challenge,
                                 nonce_range,
                                 cutoff_time,
-                                cores,
+                                threads,
                             );
 
                             let hash_time = hash_timer.elapsed();
@@ -299,7 +299,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             let _ = sender.send(Message::Binary(bin_data)).await;
 
                             tokio::time::sleep(Duration::from_secs(3)).await;
-
 
                             let now = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
