@@ -19,7 +19,7 @@ pub struct MineArgs {
     #[arg(
         long,
         value_name = "threads",
-        default_value = "1",
+        default_value = "4",
         help = "Number of threads to use while mining"
     )]
     pub threads: u32,

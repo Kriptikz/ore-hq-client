@@ -245,12 +245,16 @@ async fn run_command(
             if let Some(choice) = selection {
                 match choice {
                     "Mine" => {
-                        let threads = Text::new("Enter the number of threads:").prompt()?;
+                        let threads = Text::new("Enter the number of threads:")
+                            .with_default("4") // Set the default value to 4
+                            .prompt()?;
                         let args = MineArgs { threads: threads.parse()? };
                         mine(args, key, base_url, unsecure_conn).await;
                     },
                     "ProtoMine" => {
-                        let threads = Text::new("Enter the number of threads:").prompt()?;
+                        let threads = Text::new("Enter the number of threads:")
+                            .with_default("4") // Set the default value to 4
+                            .prompt()?;
                         let args = ProtoMineArgs { threads: threads.parse()? };
                         protomine(args, key, base_url, unsecure_conn).await;
                     },
