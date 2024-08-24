@@ -3,23 +3,56 @@ use std::io::{self, Write};
 use spl_token::amount_to_ui_amount;
 use clap::Parser;
 use solana_sdk::{signature::Keypair, signer::Signer};
+use tokio::time;
 
 #[derive(Debug, Parser)]
 pub struct ClaimArgs {
     #[arg(
         long,
         value_name = "AMOUNT",
-        default_value = "0.00",
         help = "Amount of ore to claim."
     )]
-    pub amount: f64,
+    pub amount: Option<f64>,
 }
 
 pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
-    let mut claim_amount = (args.amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+    // Prompt for amount if not provided
+    let claim_amount = if let Some(amount) = args.amount {
+        amount
+    } else {
+        print!("Please enter the amount of rewards to claim: ");
+        io::stdout().flush().unwrap();
 
-    if claim_amount == 0 {
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+
+        match input.trim().parse::<f64>() {
+            Ok(val) => val,
+            Err(_) => {
+                println!("Please enter a valid number.");
+                return;
+            }
+        }
+    };
+
+    // Convert the claim amount to the smallest unit
+    let claim_amount_grains = (claim_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+
+    // Handle the case where the claim amount is zero
+    if claim_amount_grains == 0 {
         println!("You entered 0 rewards to claim, so no claim will be made.");
+        return;
+    }
+
+    // Ask for confirmation
+    println!("You are about to claim {} ORE. Are you sure? (y/n)", amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS));
+    io::stdout().flush().unwrap();
+
+    let mut confirm = String::new();
+    io::stdin().read_line(&mut confirm).unwrap();
+
+    if confirm.trim().to_lowercase() != "y" {
+        println!("Claim cancelled.");
         return;
     }
 
@@ -32,17 +65,19 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         "https".to_string()
     };
 
-    let balance = client.get(format!("{}://{}/miner/rewards?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
+    let balance = client.get(format!("{}://{}/miner/rewards?pubkey={}", url_prefix, base_url, key.pubkey().to_string()))
+        .send().await.unwrap().text().await.unwrap();
     let balance_grains = (balance.parse::<f64>().unwrap() * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
 
-    if claim_amount > balance_grains {
-        println!("You do not have enough rewards to claim {} ORE.", amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS));
+    // Ensure the claim amount does not exceed the available balance
+    if claim_amount_grains > balance_grains {
+        println!("You do not have enough rewards to claim {} ORE.", amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS));
         println!("Please enter an amount less than or equal to {} ORE.", amount_to_ui_amount(balance_grains, ore_api::consts::TOKEN_DECIMALS));
         return;
     }
 
-    println!("Sending claim request for amount {}...", amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS));
-    let resp = client.post(format!("{}://{}/claim?pubkey={}&amount={}", url_prefix, base_url, key.pubkey().to_string(), claim_amount)).send().await;
+    println!("Sending claim request for amount {}...", amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS));
+    let resp = client.post(format!("{}://{}/claim?pubkey={}&amount={}", url_prefix, base_url, key.pubkey().to_string(), claim_amount_grains)).send().await;
 
     match resp {
         Ok(res) => {

@@ -32,6 +32,7 @@ home = "0.5.9"
 dirs = "5.0.1"
 colored = "2.0"
 indicatif = "0.17"
+ctrlc = "3.2"
 
 [profile.release]
 opt-level = 3     # Full optimisations

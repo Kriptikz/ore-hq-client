@@ -103,20 +103,19 @@ async fn main() {
     }
 }
 
-
 async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Args::parse();
 
     let version = env!("CARGO_PKG_VERSION");
 
     let options = vec![
-        "Mine",
-        "ProtoMine",
-        "Sign up",
-        "Claim Rewards",
-        "View Balances",
-        "Help",
-        "Exit",
+        "  Mine",
+        "  ProtoMine",
+        "  Sign up",
+        "  Claim Rewards",
+        "  View Balances",
+        "  Stake Ore",
+        "  Exit",
     ];
 
     println!();
@@ -124,22 +123,24 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     let selection = match &args.command {
         Some(_) => None, // Just execute the command if they enter it like normal
         None => Select::new(
-            &format!("Welcome to Ec1ipse Ore HQ Client v{}, what would you like to do?\n", version), 
+            &format!("Welcome to Ec1ipse Ore HQ Client v{}, what would you like to do?", version), 
             options
         )
         .prompt()
         .ok(),
     };
 
-    if selection == Some("Exit") {
+    // Check if the user selected "Exit"
+    if let Some("  Exit") = selection {
         std::process::exit(0);
     }
 
-    if selection == Some("Help") {
-        println!("This is a command line tool to interact with the Ec1ipse Ore Mining Pool. Use the options provided to mine, check balances, claim rewards, or sign up.");
+    if selection == Some("  Stake Ore") {
+        println!("  Coming soon!");
         return Ok(());
     }
 
+    // If not exiting, continue with the keypair and URL checks
     let base_url = if args.url == "ec1ipse.me" {
         let url_input = Text::new("Please enter the server URL:")
             .with_default("ec1ipse.me")
@@ -165,22 +166,52 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
         args.keypair.clone()
     };
 
-    // Prompt the user to confirm using the default keypair path
-    if keypair_path.ends_with("id.json") {
+    // Check if the keypair file exists at the resolved path
+    let keypair_exists = PathBuf::from(&keypair_path).exists();
+
+    if keypair_exists {
         let use_default = Confirm::new(&format!("Do you want to use the default keypair located at {}?", keypair_path))
             .with_default(true) // This sets "Yes" as the default option
             .prompt()
             .unwrap_or(true);
 
         if !use_default {
-            let custom_keypair = Text::new("Please enter the path to your keypair:")
-                .prompt()
-                .unwrap();
+            let custom_keypair = loop {
+                let input_keypair = Text::new("Please enter the path to your keypair:")
+                    .prompt()
+                    .unwrap();
+
+                if PathBuf::from(&input_keypair).exists() {
+                    break input_keypair;
+                } else {
+                    println!("Keypair file not found at the specified path. Please enter a valid file path.");
+                }
+            };
+
             let key = read_keypair_file(&custom_keypair)
                 .expect(&format!("Failed to load keypair from file: {}", custom_keypair));
             run_command(args.command, key, base_url, unsecure_conn, selection).await?;
             return Ok(());
         }
+    } else {
+        println!("Default keypair not found. Please provide a valid keypair file.");
+        
+        let custom_keypair = loop {
+            let input_keypair = Text::new("Please enter the path to your keypair:")
+                .prompt()
+                .unwrap();
+
+            if PathBuf::from(&input_keypair).exists() {
+                break input_keypair;
+            } else {
+                println!("Keypair file not found at the specified path. Please enter a valid file path.");
+            }
+        };
+
+        let key = read_keypair_file(&custom_keypair)
+            .expect(&format!("Failed to load keypair from file: {}", custom_keypair));
+        run_command(args.command, key, base_url, unsecure_conn, selection).await?;
+        return Ok(());
     }
 
     let key = read_keypair_file(&keypair_path)
@@ -221,15 +252,37 @@ async fn run_command(
             }
         },
         Some(Commands::Claim(args)) => {
+            // If the amount is not provided, ask for it
+            let claim_amount = if let Some(amount) = args.amount {
+                amount
+            } else {
+                loop {
+                    let input = Text::new("Enter the amount to claim:").prompt().unwrap_or_default();
+                    
+                    match input.trim().parse::<f64>() {
+                        Ok(valid_amount) => break valid_amount,
+                        Err(_) => {
+                            println!("Invalid input. Please enter a valid number.");
+                        }
+                    }
+                }
+            };
+
             // Display claimable balance before confirming claim
             balance(&key, base_url.clone(), unsecure_conn).await;
+            println!();
 
-            let confirm_claim = Confirm::new(&format!("{}", format!("Are you sure you want to claim {} rewards?", args.amount).red()))
-                .with_default(true)
-                .prompt()
-                .unwrap_or(true);
+            // Confirm the claim
+            let confirm_claim = Confirm::new(&format!(
+                "Are you sure you want to claim {} rewards?",
+                claim_amount.to_string().red()
+            ))
+            .with_default(true)
+            .prompt()
+            .unwrap_or(true);
 
             if confirm_claim {
+                let args = ClaimArgs { amount: Some(claim_amount) };
                 claim::claim(args, key, base_url, unsecure_conn).await;
                 prompt_to_continue();
             } else {
@@ -244,21 +297,41 @@ async fn run_command(
         None => {
             if let Some(choice) = selection {
                 match choice {
-                    "Mine" => {
-                        let threads = Text::new("Enter the number of threads:")
-                            .with_default("4") // Set the default value to 4
-                            .prompt()?;
-                        let args = MineArgs { threads: threads.parse()? };
+                    "  Mine" => {
+                        let threads: u32 = loop {
+                            let input = Text::new("Enter the number of threads:")
+                                .with_default("4")
+                                .prompt()?;
+            
+                            match input.trim().parse::<u32>() {
+                                Ok(valid_threads) if valid_threads > 0 => break valid_threads,
+                                _ => {
+                                    println!("Invalid input. Please enter a valid number greater than 0.");
+                                }
+                            }
+                        };
+            
+                        let args = MineArgs { threads };
                         mine(args, key, base_url, unsecure_conn).await;
                     },
-                    "ProtoMine" => {
-                        let threads = Text::new("Enter the number of threads:")
-                            .with_default("4") // Set the default value to 4
-                            .prompt()?;
-                        let args = ProtoMineArgs { threads: threads.parse()? };
+                    "  ProtoMine" => {
+                        let threads: u32 = loop {
+                            let input = Text::new("Enter the number of threads:")
+                                .with_default("4")
+                                .prompt()?;
+            
+                            match input.trim().parse::<u32>() {
+                                Ok(valid_threads) if valid_threads > 0 => break valid_threads,
+                                _ => {
+                                    println!("Invalid input. Please enter a valid number greater than 0.");
+                                }
+                            }
+                        };
+            
+                        let args = ProtoMineArgs { threads: threads.try_into().unwrap() };
                         protomine(args, key, base_url, unsecure_conn).await;
-                    },
-                    "Sign up" => {
+                    },            
+                    "  Sign up" => {
                         let confirm_signup = Confirm::new(&format!("{}", "Are you sure you want to sign up to the pool?".red()))
                             .with_default(true)
                             .prompt()
@@ -272,7 +345,7 @@ async fn run_command(
                             prompt_to_continue();
                         }
                     },
-                    "Claim Rewards" => {
+                    "  Claim Rewards" => {
                         // Display claimable balance before confirming claim
                         balance(&key, base_url.clone(), unsecure_conn).await;
                         println!();
@@ -295,7 +368,7 @@ async fn run_command(
                             .unwrap_or(true);
 
                         if confirm_claim {
-                            let args = ClaimArgs { amount };
+                            let args = ClaimArgs { amount: Some(amount) };
                             claim::claim(args, key, base_url, unsecure_conn).await;
                             prompt_to_continue();
                         } else {
@@ -303,12 +376,12 @@ async fn run_command(
                             prompt_to_continue();
                         }
                     },
-                    "View Balances" => {
+                    "  View Balances" => {
                         balance(&key, base_url, unsecure_conn).await;
                         prompt_to_continue();
                     },
-                    "Help" => {
-                        println!("This is a command line tool to interact with the Ec1ipse Ore Mining Pool. Use the options provided to mine, check balances, claim rewards, or sign up.");
+                    "  Stake Ore" => {
+                        println!("Coming soon!");
                         prompt_to_continue();
                     },
                     _ => println!("Unknown selection."),
@@ -319,6 +392,7 @@ async fn run_command(
 
     Ok(())
 }
+
 
 
 fn prompt_to_continue() {
