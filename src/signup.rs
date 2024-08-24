@@ -45,7 +45,7 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
                     println!("You're already signed up!");
                 }
                 _ => {
-                    println!("Transaction failed, please wait and try again.");
+                    println!("Transaction failed, please try again.\nDo you have enough SOL in the account?");
                 }
             }
         } else {

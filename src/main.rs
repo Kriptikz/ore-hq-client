@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use inquire::{Text, Confirm, Select};
 use dirs::home_dir;
 use std::path::PathBuf;
-use std::io::{self, Read};
+use std::io::{self, Read, Write, BufRead};
 use solana_sdk::signature::read_keypair_file;
 use signup::signup;
 use claim::ClaimArgs;
@@ -10,12 +10,15 @@ use mine::{MineArgs, mine};
 use protomine::{MineArgs as ProtoMineArgs, protomine};
 use balance::balance;
 use colored::*;
+use std::fs;
 
 mod signup;
 mod protomine;
 mod mine;
 mod claim;
 mod balance;
+
+const CONFIG_FILE: &str = "keypair_list";
 
 /// A command line interface tool for pooling power to submit hashes for proportional ORE rewards
 #[derive(Parser, Debug)]
@@ -67,21 +70,15 @@ enum Commands {
 async fn main() {
     let mut args = Args::parse();
 
-    // Check if a command was provided
-    if let Some(command) = args.command.take() {
-        // Resolve the keypair path, expanding '~' to home directory
-        let keypair_path = if args.keypair.starts_with("~") {
-            if let Some(home_dir) = home_dir() {
-                let mut expanded_path = PathBuf::from(home_dir);
-                expanded_path.push(&args.keypair[2..]); // Skip '~/' in keypair path
-                expanded_path.to_string_lossy().into_owned()
-            } else {
-                args.keypair.clone()
-            }
-        } else {
-            args.keypair.clone()
-        };
+    // Does the config file exist? If not, create one
+    let config_path = PathBuf::from(CONFIG_FILE);
+    if !config_path.exists() {
+        fs::File::create(&config_path).expect("Failed to create configuration file.");
+    }
 
+    // Check if a command was provided during runtime
+    if let Some(command) = args.command.take() {
+        let keypair_path = get_keypair_path(&args.keypair).expect("Failed to get keypair path.");
         let key = read_keypair_file(&keypair_path)
             .expect(&format!("Failed to load keypair from file: {}", keypair_path));
 
@@ -103,8 +100,143 @@ async fn main() {
     }
 }
 
+fn get_keypair_path(default_keypair: &str) -> Option<String> {
+    let config_path = PathBuf::from(CONFIG_FILE);
+    let mut keypair_paths = Vec::new();
+
+    if config_path.exists() {
+        let file = fs::File::open(&config_path).expect("Failed to open configuration file.");
+        let reader = io::BufReader::new(file);
+
+        for line in reader.lines() {
+            if let Ok(path) = line {
+                let expanded_path = expand_tilde(&path);
+                let display_path = replace_home_with_tilde(&expanded_path);
+                keypair_paths.push(display_path);
+            }
+        }
+    }
+
+    // If the keypair list is empty, skip the selection and directly ask for a custom path
+    if keypair_paths.is_empty() {
+        return ask_for_custom_keypair();
+    }
+
+    keypair_paths.push("  Custom".to_string());
+    keypair_paths.push("  Remove".to_string());
+
+    // Ask the user to select a keypair
+    let selection = Select::new("Select a keypair to use or manage:", keypair_paths)
+        .prompt()
+        .expect("Failed to prompt for keypair selection.");
+
+    match selection.as_str() {
+        "  Custom" => ask_for_custom_keypair(),
+        "  Remove" => {
+            remove_keypair();
+            // After removal, re-run the selection process
+            return get_keypair_path(default_keypair);
+        }
+        _ => Some(expand_tilde(&selection)),
+    }
+}
+
+fn remove_keypair() {
+    let config_path = PathBuf::from(CONFIG_FILE);
+    let mut keypair_paths = Vec::new();
+
+    if config_path.exists() {
+        let file = fs::File::open(&config_path).expect("Failed to open configuration file.");
+        let reader = io::BufReader::new(file);
+
+        for line in reader.lines() {
+            if let Ok(path) = line {
+                let expanded_path = expand_tilde(&path);
+                let display_path = replace_home_with_tilde(&expanded_path);
+                keypair_paths.push(display_path);
+            }
+        }
+    }
+
+    if keypair_paths.is_empty() {
+        println!("No keypairs available to remove.");
+        return;
+    }
+
+    let selection = Select::new("Select a keypair to remove:", keypair_paths.clone())
+        .prompt()
+        .expect("Failed to prompt for keypair removal.");
+
+    let remove_index = keypair_paths.iter().position(|p| p == &selection).unwrap();
+
+    // Re-expand the tilde for file operations
+    let removed_path = expand_tilde(&keypair_paths[remove_index]);
+
+    keypair_paths.remove(remove_index);
+
+    // Write the updated list back to the config file
+    let mut file = fs::File::create(&config_path).expect("Failed to open configuration file for writing.");
+
+    for path in keypair_paths {
+        let expanded_path = expand_tilde(&path);
+        writeln!(file, "{}", expanded_path).expect("Failed to write keypair path to configuration file.");
+    }
+
+    println!("Keypair path '{}' has been removed.", selection);
+}
+
+fn replace_home_with_tilde(path: &str) -> String {
+    if let Some(home_dir) = home_dir() {
+        let home_dir_str = home_dir.to_string_lossy();
+        if path.starts_with(&*home_dir_str) {
+            return path.replacen(&*home_dir_str, "~", 1);
+        }
+    }
+    path.to_string()
+}
+
+fn expand_tilde(path: &str) -> String {
+    if path.starts_with("~") {
+        if let Some(home_dir) = home_dir() {
+            return path.replacen("~", &home_dir.to_string_lossy(), 1);
+        }
+    }
+    path.to_string()
+}
+
+
+fn ask_for_custom_keypair() -> Option<String> {
+    let custom_path = Text::new("Enter the path to your keypair:")
+        .prompt()
+        .expect("Failed to get keypair path.");
+
+    let expanded_path = expand_tilde(&custom_path);
+    let custom_path_exists = PathBuf::from(&expanded_path).exists();
+
+    if custom_path_exists {
+        let add_to_list = Confirm::new("Would you like to add this keypair path to the configuration file?")
+            .with_default(true)
+            .prompt()
+            .unwrap_or(true);
+
+        if add_to_list {
+            let config_path = PathBuf::from(CONFIG_FILE);
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(&config_path)
+                .expect("Failed to open configuration file for appending.");
+
+            writeln!(file, "{}", expanded_path).expect("Failed to write keypair path to configuration file.");
+        }
+        Some(expanded_path)
+    } else {
+        println!("The specified keypair path does not exist.");
+        None
+    }
+}
+
 async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = Args::parse();
+    let args = Args::parse();
 
     let version = env!("CARGO_PKG_VERSION");
 
@@ -140,7 +272,6 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // If not exiting, continue with the keypair and URL checks
     let base_url = if args.url == "ec1ipse.me" {
         let url_input = Text::new("Please enter the server URL:")
             .with_default("ec1ipse.me")
@@ -153,73 +284,21 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
 
     let unsecure_conn = args.use_http;
 
-    // Resolve the keypair path, expanding '~' to home directory
-    let keypair_path = if args.keypair.starts_with("~") {
-        if let Some(home_dir) = home_dir() {
-            let mut expanded_path = PathBuf::from(home_dir);
-            expanded_path.push(&args.keypair[2..]); // Skip '~/' in keypair path
-            expanded_path.to_string_lossy().into_owned()
-        } else {
-            args.keypair.clone()
-        }
-    } else {
-        args.keypair.clone()
-    };
+    let keypair_path = get_keypair_path(&args.keypair).expect("Failed to get keypair path.");
 
     // Check if the keypair file exists at the resolved path
     let keypair_exists = PathBuf::from(&keypair_path).exists();
 
     if keypair_exists {
-        let use_default = Confirm::new(&format!("Do you want to use the default keypair located at {}?", keypair_path))
-            .with_default(true) // This sets "Yes" as the default option
-            .prompt()
-            .unwrap_or(true);
+        let key = read_keypair_file(&keypair_path)
+            .expect(&format!("Failed to load keypair from file: {}", keypair_path));
 
-        if !use_default {
-            let custom_keypair = loop {
-                let input_keypair = Text::new("Please enter the path to your keypair:")
-                    .prompt()
-                    .unwrap();
-
-                if PathBuf::from(&input_keypair).exists() {
-                    break input_keypair;
-                } else {
-                    println!("Keypair file not found at the specified path. Please enter a valid file path.");
-                }
-            };
-
-            let key = read_keypair_file(&custom_keypair)
-                .expect(&format!("Failed to load keypair from file: {}", custom_keypair));
-            run_command(args.command, key, base_url, unsecure_conn, selection).await?;
-            return Ok(());
-        }
-    } else {
-        println!("Default keypair not found. Please provide a valid keypair file.");
-        
-        let custom_keypair = loop {
-            let input_keypair = Text::new("Please enter the path to your keypair:")
-                .prompt()
-                .unwrap();
-
-            if PathBuf::from(&input_keypair).exists() {
-                break input_keypair;
-            } else {
-                println!("Keypair file not found at the specified path. Please enter a valid file path.");
-            }
-        };
-
-        let key = read_keypair_file(&custom_keypair)
-            .expect(&format!("Failed to load keypair from file: {}", custom_keypair));
         run_command(args.command, key, base_url, unsecure_conn, selection).await?;
         return Ok(());
+    } else {
+        println!("Keypair not found at the specified path.");
+        return Ok(());
     }
-
-    let key = read_keypair_file(&keypair_path)
-        .expect(&format!("Failed to load keypair from file: {}", keypair_path));
-
-    run_command(args.command, key, base_url, unsecure_conn, selection).await?;
-
-    Ok(())
 }
 
 async fn run_command(
@@ -256,7 +335,6 @@ async fn run_command(
             balance(&key, base_url.clone(), unsecure_conn).await;
             println!();
 
-            // If the amount is not provided, ask for it
             let claim_amount = if let Some(amount) = args.amount {
                 amount
             } else {
@@ -272,7 +350,6 @@ async fn run_command(
                 }
             };
 
-            // Confirm the claim
             let confirm_claim = Confirm::new(&format!(
                 "Are you sure you want to claim {} rewards?",
                 claim_amount.to_string().red()
@@ -346,11 +423,9 @@ async fn run_command(
                         }
                     },
                     "  Claim Rewards" => {
-                        // Display claimable balance before prompting for the amount
                         balance(&key, base_url.clone(), unsecure_conn).await;
                         println!();
 
-                        // Input validation loop for amount
                         let amount: f64 = loop {
                             let input = Text::new("Enter the amount to claim:").prompt().unwrap_or_default();
                             
@@ -392,8 +467,6 @@ async fn run_command(
 
     Ok(())
 }
-
-
 
 fn prompt_to_continue() {
     println!("\nPress any key to continue...");

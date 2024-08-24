@@ -3,7 +3,6 @@ use std::io::{self, Write};
 use spl_token::amount_to_ui_amount;
 use clap::Parser;
 use solana_sdk::{signature::Keypair, signer::Signer};
-use tokio::time;
 use crate::balance::balance;
 
 #[derive(Debug, Parser)]

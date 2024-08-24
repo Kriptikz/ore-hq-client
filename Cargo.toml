@@ -33,7 +33,6 @@ dirs = "5.0.1"
 colored = "2.0"
 indicatif = "0.17"
 
-
 [profile.release]
 opt-level = 3     # Full optimisations
 codegen-units = 1 # Better optimization with fewer codegen units
