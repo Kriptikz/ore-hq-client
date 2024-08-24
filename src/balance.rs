@@ -1,5 +1,7 @@
 use solana_sdk::{signature::Keypair, signer::Signer};
 use std::io::Read;
+use std::time::Duration;
+use std::thread::sleep;
 
 pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     let base_url = url;
@@ -58,6 +60,7 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
 }
 
 fn prompt_to_continue() {
+    sleep(Duration::from_millis(100));
     println!("\nPress any key to continue...");
     let _ = std::io::stdin().read(&mut [0u8]).unwrap();
 }

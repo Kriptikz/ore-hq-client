@@ -4,8 +4,7 @@ use spl_token::amount_to_ui_amount;
 use clap::Parser;
 use solana_sdk::{signature::Keypair, signer::Signer};
 use colored::*;
-
-use crate::balance;
+use std::thread::sleep;
 
 #[derive(Debug, Parser)]
 pub struct ClaimArgs {
@@ -18,7 +17,6 @@ pub struct ClaimArgs {
 }
 
 pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
-    // Check balance before proceeding to claim
     let client = reqwest::Client::new();
     let url_prefix = if unsecure {
         "http".to_string()
@@ -26,7 +24,27 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         "https".to_string()
     };
 
-    let balance_resp = client
+    // Fetch and display balance and rewards
+    let balance_response = client
+        .get(format!(
+            "{}://{}/miner/balance?pubkey={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    let balance = match balance_response.parse::<f64>() {
+        Ok(b) => b,
+        Err(_) => 0.0,
+    };
+
+    let rewards_response = client
         .get(format!(
             "{}://{}/miner/rewards?pubkey={}",
             url_prefix,
@@ -34,26 +52,23 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
             key.pubkey().to_string()
         ))
         .send()
-        .await;
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
 
-    let balance_grains = match balance_resp {
-        Ok(resp) => {
-            let balance = resp.text().await.unwrap_or("0".to_string());
-            match balance.parse::<f64>() {
-                Ok(parsed_balance) => (parsed_balance * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64,
-                Err(_) => {
-                    println!("\nThere is no balance to claim.");
-                    prompt_to_continue(); // Pause before returning
-                    return;
-                }
-            }
-        }
-        Err(_) => {
-            println!("\nThere is no balance to claim.");
-            prompt_to_continue(); // Pause before returning
-            return;
-        }
+    let rewards = match rewards_response.parse::<f64>() {
+        Ok(r) => r,
+        Err(_) => 0.0,
     };
+
+    println!();
+    println!("Unclaimed Rewards: {:.11} ORE", rewards);
+    println!("Wallet Balance:    {:.11} ORE", balance);
+
+    // Convert balance to grains
+    let balance_grains = (rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
 
     // If balance is zero, inform the user and return to keypair selection
     if balance_grains == 0 {
@@ -62,14 +77,11 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         return;
     }
 
-    // Display balance after confirming the user has rewards
-    balance(&key, url.clone(), unsecure).await;
-
     // Prompt for amount if not provided
     let claim_amount = if let Some(amount) = args.amount {
         amount
     } else {
-        print!("Enter the amount to claim: ");
+        print!("\nEnter the amount to claim: ");
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
@@ -148,7 +160,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     match resp {
         Ok(res) => {
             let response_text = res.text().await.unwrap();
-            if response_text == "SUCCESS" {
+            if (response_text == "SUCCESS") {
                 println!("Successfully claimed rewards!");
             } else if let Ok(time) = response_text.parse::<u64>() {
                 let time_left = 1800 - time;
@@ -173,6 +185,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
 }
 
 fn prompt_to_continue() {
+    sleep(Duration::from_millis(100));
     println!("\nPress any key to continue...");
     let _ = io::stdin().read(&mut [0u8]).unwrap();
 }

@@ -1,5 +1,7 @@
 use std::str::FromStr;
 use std::io::Read;
+use std::time::Duration;
+use std::thread::sleep;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction, transaction::Transaction};
@@ -55,12 +57,11 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
     } else {
         println!("\nTransaction failed, please wait and try again.");
     }
-
-    // Pause after the signup operation completes
     prompt_to_continue();
 }
 
 fn prompt_to_continue() {
+    sleep(Duration::from_millis(100));
     println!("\nPress any key to continue...");
     let _ = std::io::stdin().read(&mut [0u8]).unwrap();
 }
