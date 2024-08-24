@@ -252,6 +252,10 @@ async fn run_command(
             }
         },
         Some(Commands::Claim(args)) => {
+            // Display claimable balance before prompting for the amount
+            balance(&key, base_url.clone(), unsecure_conn).await;
+            println!();
+
             // If the amount is not provided, ask for it
             let claim_amount = if let Some(amount) = args.amount {
                 amount
@@ -262,15 +266,11 @@ async fn run_command(
                     match input.trim().parse::<f64>() {
                         Ok(valid_amount) => break valid_amount,
                         Err(_) => {
-                            println!("Invalid input. Please enter a valid number.");
+                            return Ok(());
                         }
                     }
                 }
             };
-
-            // Display claimable balance before confirming claim
-            balance(&key, base_url.clone(), unsecure_conn).await;
-            println!();
 
             // Confirm the claim
             let confirm_claim = Confirm::new(&format!(
@@ -346,7 +346,7 @@ async fn run_command(
                         }
                     },
                     "  Claim Rewards" => {
-                        // Display claimable balance before confirming claim
+                        // Display claimable balance before prompting for the amount
                         balance(&key, base_url.clone(), unsecure_conn).await;
                         println!();
 
@@ -357,7 +357,7 @@ async fn run_command(
                             match input.trim().parse::<f64>() {
                                 Ok(valid_amount) => break valid_amount,
                                 Err(_) => {
-                                    println!("Invalid input. Please enter a valid number.");
+                                    return Ok (());
                                 }
                             }
                         };

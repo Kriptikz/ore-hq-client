@@ -19,6 +19,6 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
         .text().await.unwrap();
     
     println!();
-    println!("Wallet Balance:    {:.11} ORE", balance);
     println!("Unclaimed Rewards: {:.11} ORE", rewards);
+    println!("Wallet Balance:    {:.11} ORE", balance);   
 }

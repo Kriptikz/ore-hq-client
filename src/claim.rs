@@ -4,6 +4,7 @@ use spl_token::amount_to_ui_amount;
 use clap::Parser;
 use solana_sdk::{signature::Keypair, signer::Signer};
 use tokio::time;
+use crate::balance::balance;
 
 #[derive(Debug, Parser)]
 pub struct ClaimArgs {
@@ -16,11 +17,14 @@ pub struct ClaimArgs {
 }
 
 pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
+    // Display balance before proceeding with claim
+    balance(&key, url.clone(), unsecure).await;
+
     // Prompt for amount if not provided
     let claim_amount = if let Some(amount) = args.amount {
         amount
     } else {
-        print!("Please enter the amount of rewards to claim: ");
+        print!("Enter the amount to claim: ");
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
@@ -45,7 +49,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     }
 
     // Ask for confirmation
-    println!("You are about to claim {} ORE. Are you sure? (y/n)", amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS));
+    println!("Are you sure you want to claim {} ORE? (Y/n)", amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS));
     io::stdout().flush().unwrap();
 
     let mut confirm = String::new();
