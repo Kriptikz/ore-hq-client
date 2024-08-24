@@ -1,4 +1,5 @@
 use solana_sdk::{signature::Keypair, signer::Signer};
+use std::io::Read;
 
 pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     let base_url = url;
@@ -51,4 +52,12 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     println!();
     println!("Unclaimed Rewards: {:.11} ORE", rewards);
     println!("Wallet Balance:    {:.11} ORE", balance);
+
+    // Pause after displaying balance and rewards information
+    prompt_to_continue();
+}
+
+fn prompt_to_continue() {
+    println!("\nPress any key to continue...");
+    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
 }

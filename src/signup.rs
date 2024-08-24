@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::io::Read;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction, transaction::Transaction};
@@ -39,19 +40,27 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
 
             match txt.as_str() {
                 "SUCCESS" => {
-                    println!("Successfully signed up!");
+                    println!("\nSuccessfully signed up!");
                 },
                 "EXISTS" => {
-                    println!("You're already signed up!");
+                    println!("\nYou're already signed up!");
                 }
                 _ => {
-                    println!("Transaction failed, please try again.\nDo you have enough SOL in the account?");
+                    println!("\nTransaction failed, please try again.\nDo you have enough SOL in the account?");
                 }
             }
         } else {
-            println!("Transaction failed, please wait and try again.");
+            println!("\nTransaction failed, please wait and try again.");
         }
     } else {
-        println!("Transaction failed, please wait and try again.");
+        println!("\nTransaction failed, please wait and try again.");
     }
+
+    // Pause after the signup operation completes
+    prompt_to_continue();
+}
+
+fn prompt_to_continue() {
+    println!("\nPress any key to continue...");
+    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
 }

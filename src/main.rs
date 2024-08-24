@@ -9,7 +9,6 @@ use claim::ClaimArgs;
 use mine::{MineArgs, mine};
 use protomine::{MineArgs as ProtoMineArgs, protomine};
 use balance::balance;
-use colored::*;
 use std::fs;
 
 mod signup;
@@ -105,7 +104,13 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
     let mut keypair_paths = Vec::new();
 
     if config_path.exists() {
-        let file = fs::File::open(&config_path).expect("Failed to open configuration file.");
+        let file = match fs::File::open(&config_path) {
+            Ok(f) => f,
+            Err(_) => {
+                println!("Failed to open configuration file.");
+                return ask_for_custom_keypair();
+            }
+        };
         let reader = io::BufReader::new(file);
 
         for line in reader.lines() {
@@ -117,7 +122,6 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
         }
     }
 
-    // If the keypair list is empty, skip the selection and directly ask for a custom path
     if keypair_paths.is_empty() {
         return ask_for_custom_keypair();
     }
@@ -125,21 +129,40 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
     keypair_paths.push("  Custom".to_string());
     keypair_paths.push("  Remove".to_string());
 
-    // Ask the user to select a keypair
-    let selection = Select::new("Select a keypair to use or manage:", keypair_paths)
-        .prompt()
-        .expect("Failed to prompt for keypair selection.");
+    loop {
+        let selection = match Select::new("Select a keypair to use or manage:", keypair_paths.clone()).prompt() {
+            Ok(s) => s,
+            Err(_) => {
+                println!("Failed to prompt for keypair selection.");
+                continue;
+            }
+        };
 
-    match selection.as_str() {
-        "  Custom" => ask_for_custom_keypair(),
-        "  Remove" => {
-            remove_keypair();
-            // After removal, re-run the selection process
-            return get_keypair_path(default_keypair);
+        match selection.as_str() {
+            "  Custom" => return ask_for_custom_keypair(),
+            "  Remove" => {
+                remove_keypair();
+                return get_keypair_path(default_keypair);
+            }
+            _ => {
+                let selected_path = expand_tilde(&selection);
+                if PathBuf::from(&selected_path).exists() {
+                    // Load the keypair here and retry if it fails
+                    if load_keypair(&selected_path).is_some() {
+                        return Some(selected_path);
+                    } else {
+                        println!("Please select a valid keypair.");
+                        continue;
+                    }
+                } else {
+                    println!("The specified keypair path does not exist. Please enter a valid path.");
+                    return ask_for_custom_keypair();
+                }
+            }
         }
-        _ => Some(expand_tilde(&selection)),
     }
 }
+
 
 fn remove_keypair() {
     let config_path = PathBuf::from(CONFIG_FILE);
@@ -168,9 +191,6 @@ fn remove_keypair() {
         .expect("Failed to prompt for keypair removal.");
 
     let remove_index = keypair_paths.iter().position(|p| p == &selection).unwrap();
-
-    // Re-expand the tilde for file operations
-    let removed_path = expand_tilde(&keypair_paths[remove_index]);
 
     keypair_paths.remove(remove_index);
 
@@ -206,14 +226,24 @@ fn expand_tilde(path: &str) -> String {
 
 
 fn ask_for_custom_keypair() -> Option<String> {
-    let custom_path = Text::new("Enter the path to your keypair:")
-        .prompt()
-        .expect("Failed to get keypair path.");
+    loop {
+        let custom_path = Text::new("Enter the path to your keypair:")
+            .prompt()
+            .expect("Failed to get keypair path.");
 
-    let expanded_path = expand_tilde(&custom_path);
-    let custom_path_exists = PathBuf::from(&expanded_path).exists();
+        let expanded_path = expand_tilde(&custom_path);
+        let custom_path_exists = PathBuf::from(&expanded_path).exists();
 
-    if custom_path_exists {
+        if !custom_path_exists {
+            println!("The specified keypair path does not exist.");
+            continue;
+        }
+
+        if check_keypair_exists(&expanded_path) {
+            println!("The keypair path '{}' already exists in the configuration file. Please provide a new one.", custom_path);
+            continue;
+        }
+
         let add_to_list = Confirm::new("Would you like to add this keypair path to the configuration file?")
             .with_default(true)
             .prompt()
@@ -228,16 +258,48 @@ fn ask_for_custom_keypair() -> Option<String> {
 
             writeln!(file, "{}", expanded_path).expect("Failed to write keypair path to configuration file.");
         }
-        Some(expanded_path)
-    } else {
-        println!("The specified keypair path does not exist.");
-        None
+
+        return Some(expanded_path);
+    }
+}
+
+fn check_keypair_exists(path: &str) -> bool {
+    let config_path = PathBuf::from(CONFIG_FILE);
+
+    if config_path.exists() {
+        let file = fs::File::open(&config_path).expect("Failed to open configuration file.");
+        let reader = io::BufReader::new(file);
+
+        for line in reader.lines() {
+            if let Ok(existing_path) = line {
+                if expand_tilde(&existing_path) == path {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn load_keypair(keypair_path: &str) -> Option<solana_sdk::signature::Keypair> {
+    use std::panic::{self, AssertUnwindSafe};
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        read_keypair_file(keypair_path)
+    }));
+
+    match result {
+        Ok(Ok(keypair)) => Some(keypair),
+        Ok(Err(_)) | Err(_) => {
+            println!("Failed to load keypair from file: {}", keypair_path);
+            None
+        }
     }
 }
 
 async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-
     let version = env!("CARGO_PKG_VERSION");
 
     let options = vec![
@@ -253,7 +315,7 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     let selection = match &args.command {
-        Some(_) => None, // Just execute the command if they enter it like normal
+        Some(_) => None,
         None => Select::new(
             &format!("Welcome to Ec1ipse Ore HQ Client v{}, what would you like to do?", version), 
             options
@@ -262,7 +324,6 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
         .ok(),
     };
 
-    // Check if the user selected "Exit"
     if let Some("  Exit") = selection {
         std::process::exit(0);
     }
@@ -284,21 +345,20 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
 
     let unsecure_conn = args.use_http;
 
-    let keypair_path = get_keypair_path(&args.keypair).expect("Failed to get keypair path.");
+    let keypair_path = loop {
+        match get_keypair_path(&args.keypair) {
+            Some(path) => break path,
+            None => println!("Failed to get keypair path. Please try again."),
+        }
+    };
 
-    // Check if the keypair file exists at the resolved path
-    let keypair_exists = PathBuf::from(&keypair_path).exists();
+    let key = load_keypair(&keypair_path).unwrap_or_else(|| {
+        println!("Returning to keypair selection.");
+        std::process::exit(1);
+    });
 
-    if keypair_exists {
-        let key = read_keypair_file(&keypair_path)
-            .expect(&format!("Failed to load keypair from file: {}", keypair_path));
-
-        run_command(args.command, key, base_url, unsecure_conn, selection).await?;
-        return Ok(());
-    } else {
-        println!("Keypair not found at the specified path.");
-        return Ok(());
-    }
+    run_command(args.command, key, base_url, unsecure_conn, selection).await?;
+    Ok(())
 }
 
 async fn run_command(
@@ -308,8 +368,7 @@ async fn run_command(
     unsecure_conn: bool,
     selection: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-
-    match command {
+        match command {
         Some(Commands::Mine(args)) => {
             mine(args, key, base_url, unsecure_conn).await;
         },
@@ -317,59 +376,14 @@ async fn run_command(
             protomine(args, key, base_url, unsecure_conn).await;
         },
         Some(Commands::Signup) => {
-            let confirm_signup = Confirm::new(&format!("{}", "Are you sure you want to sign up to the pool?".red()))
-                .with_default(true)
-                .prompt()
-                .unwrap_or(true);
-
-            if confirm_signup {
-                signup(base_url, key, unsecure_conn).await;
-                prompt_to_continue();
-            } else {
-                println!("Sign up cancelled.");
-                prompt_to_continue();
-            }
+            signup(base_url, key, unsecure_conn).await;
         },
         Some(Commands::Claim(args)) => {
-            // Display claimable balance before prompting for the amount
-            balance(&key, base_url.clone(), unsecure_conn).await;
-            println!();
-
-            let claim_amount = if let Some(amount) = args.amount {
-                amount
-            } else {
-                loop {
-                    let input = Text::new("Enter the amount to claim:").prompt().unwrap_or_default();
-                    
-                    match input.trim().parse::<f64>() {
-                        Ok(valid_amount) => break valid_amount,
-                        Err(_) => {
-                            return Ok(());
-                        }
-                    }
-                }
-            };
-
-            let confirm_claim = Confirm::new(&format!(
-                "Are you sure you want to claim {} rewards?",
-                claim_amount.to_string().red()
-            ))
-            .with_default(true)
-            .prompt()
-            .unwrap_or(true);
-
-            if confirm_claim {
-                let args = ClaimArgs { amount: Some(claim_amount) };
-                claim::claim(args, key, base_url, unsecure_conn).await;
-                prompt_to_continue();
-            } else {
-                println!("Claim cancelled.");
-                prompt_to_continue();
-            }
+            // Directly call the claim function and handle all claim logic there
+            claim::claim(args, key, base_url, unsecure_conn).await;
         },
         Some(Commands::Balance) => {
             balance(&key, base_url, unsecure_conn).await;
-            prompt_to_continue();
         },
         None => {
             if let Some(choice) = selection {
@@ -409,55 +423,18 @@ async fn run_command(
                         protomine(args, key, base_url, unsecure_conn).await;
                     },            
                     "  Sign up" => {
-                        let confirm_signup = Confirm::new(&format!("{}", "Are you sure you want to sign up to the pool?".red()))
-                            .with_default(true)
-                            .prompt()
-                            .unwrap_or(true);
-
-                        if confirm_signup {
-                            signup(base_url, key, unsecure_conn).await;
-                            prompt_to_continue();
-                        } else {
-                            println!("Sign up cancelled.");
-                            prompt_to_continue();
-                        }
+                        signup(base_url, key, unsecure_conn).await;
                     },
                     "  Claim Rewards" => {
-                        balance(&key, base_url.clone(), unsecure_conn).await;
-                        println!();
-
-                        let amount: f64 = loop {
-                            let input = Text::new("Enter the amount to claim:").prompt().unwrap_or_default();
-                            
-                            match input.trim().parse::<f64>() {
-                                Ok(valid_amount) => break valid_amount,
-                                Err(_) => {
-                                    return Ok (());
-                                }
-                            }
-                        };
-
-                        let confirm_claim = Confirm::new(&format!("{}", format!("Are you sure you want to claim {} rewards?", amount).red()))
-                            .with_default(true)
-                            .prompt()
-                            .unwrap_or(true);
-
-                        if confirm_claim {
-                            let args = ClaimArgs { amount: Some(amount) };
-                            claim::claim(args, key, base_url, unsecure_conn).await;
-                            prompt_to_continue();
-                        } else {
-                            println!("Claim cancelled.");
-                            prompt_to_continue();
-                        }
+                        // Call claim command directly
+                        let args = ClaimArgs { amount: None };
+                        claim::claim(args, key, base_url, unsecure_conn).await;
                     },
                     "  View Balances" => {
                         balance(&key, base_url, unsecure_conn).await;
-                        prompt_to_continue();
                     },
                     "  Stake Ore" => {
                         println!("Coming soon!");
-                        prompt_to_continue();
                     },
                     _ => println!("Unknown selection."),
                 }
@@ -466,9 +443,4 @@ async fn run_command(
     }
 
     Ok(())
-}
-
-fn prompt_to_continue() {
-    println!("\nPress any key to continue...");
-    let _ = io::stdin().read(&mut [0u8]).unwrap();
 }
