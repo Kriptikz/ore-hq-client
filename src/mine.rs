@@ -8,6 +8,7 @@ use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generat
 use base64::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::env;
 
 #[derive(Debug)]
 pub enum ServerMessage {
@@ -26,7 +27,7 @@ pub struct MineArgs {
 }
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
-    let running = Arc::new(AtomicBool::new(true));  // Add this line
+    let running = Arc::new(AtomicBool::new(true));
 
     loop {
         if !running.load(Ordering::SeqCst) {
@@ -137,19 +138,28 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
                             // Wait for 3 seconds before showing the progress bar
                             tokio::time::sleep(Duration::from_secs(3)).await;
-                
-                            // Create a spinner before mining starts
-                            let pb = ProgressBar::new_spinner();
+
+                            // Detect if running on Windows and set symbols accordingly
+                            let pb = if env::consts::OS == "windows" {
+                                ProgressBar::new_spinner().with_style(
+                                    ProgressStyle::default_spinner()
+                                        .tick_strings(&["-", "\\", "|", "/"]) // Use simple ASCII symbols
+                                        .template("{spinner:.green} {msg}")
+                                        .expect("Failed to set progress bar template"),
+                                )
+                            } else {
+                                ProgressBar::new_spinner().with_style(
+                                    ProgressStyle::default_spinner()
+                                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                                        .template("{spinner:.red} {msg}")
+                                        .expect("Failed to set progress bar template"),
+                                )
+                            };
+
                             println!();
                             pb.set_message("Mining...");
                             pb.enable_steady_tick(Duration::from_millis(120));
-                            pb.set_style(
-                                ProgressStyle::default_spinner()
-                                    .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                                    .template("{spinner:.red} {msg}")
-                                    .expect("Failed to set progress bar template"),
-                            );
-                
+
                             // Original mining code
                             let hash_timer = Instant::now();
                             let core_ids = core_affinity::get_core_ids().unwrap();
