@@ -91,7 +91,11 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
             Ok(res) => {
                 match res.text().await.unwrap().as_str() {
                     "SUCCESS" => {
-                        println!("Successfully claimed rewards!");
+                        println!("Successfully queued claim request. Please wait while it is processed.");
+                        break;
+                    },
+                    "QUEUED" => {
+                        println!("Claim is already queued for processing.");
                         break;
                     },
                     other => {
