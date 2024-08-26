@@ -159,21 +159,29 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
 
     match resp {
         Ok(res) => {
-            let response_text = res.text().await.unwrap();
-            if (response_text == "SUCCESS") {
-                println!("Successfully claimed rewards!");
-            } else if let Ok(time) = response_text.parse::<u64>() {
-                let time_left = 1800 - time;
-                let secs = time_left % 60;
-                let mins = (time_left / 60) % 60;
-                println!(
-                    "Error: You cannot claim until the time is up. Time left until next claim available: {}m {}s",
-                    mins, secs
-                );
-            } else {
-                println!("Unexpected response: {}", response_text);
+            match res.text().await.unwrap().as_str() {
+                "SUCCESS" => {
+                    println!("Successfully claimed rewards!");
+                },
+                "QUEUED" => {
+                    println!("Claim is already queued for processing.");
+                },
+                other => {
+                    if let Ok(time) = other.parse::<u64>() {
+                        let time_left = 1800 - time;
+                        let secs = time_left % 60;
+                        let mins = (time_left / 60) % 60;
+                        println!(
+                            "You cannot claim until the time is up. Time left until next claim available: {}m {}s",
+                            mins, secs
+                        );
+                    } else {
+                        println!("Unexpected response: {}", other);
+                    }
+                }
             }
         }
+
         Err(e) => {
             println!("ERROR: {}", e);
             println!("Retrying in 5 seconds...");

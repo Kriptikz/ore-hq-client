@@ -147,7 +147,6 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
             _ => {
                 let selected_path = expand_tilde(&selection);
                 if PathBuf::from(&selected_path).exists() {
-                    // Load the keypair here and retry if it fails
                     if load_keypair(&selected_path).is_some() {
                         return Some(selected_path);
                     } else {
@@ -379,7 +378,6 @@ async fn run_command(
             signup(base_url, key, unsecure_conn).await;
         },
         Some(Commands::Claim(args)) => {
-            // Directly call the claim function and handle all claim logic there
             claim::claim(args, key, base_url, unsecure_conn).await;
         },
         Some(Commands::Balance) => {
@@ -426,7 +424,6 @@ async fn run_command(
                         signup(base_url, key, unsecure_conn).await;
                     },
                     "  Claim Rewards" => {
-                        // Call claim command directly
                         let args = ClaimArgs { amount: None };
                         claim::claim(args, key, base_url, unsecure_conn).await;
                     },
