@@ -71,7 +71,7 @@ async fn main() {
 
     // Does the config file exist? If not, create one
     let config_path = PathBuf::from(CONFIG_FILE);
-    if !config_path.exists() {
+    if (!config_path.exists()) {
         fs::File::create(&config_path).expect("Failed to create configuration file.");
     }
 
@@ -162,7 +162,6 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
     }
 }
 
-
 fn remove_keypair() {
     let config_path = PathBuf::from(CONFIG_FILE);
     let mut keypair_paths = Vec::new();
@@ -222,7 +221,6 @@ fn expand_tilde(path: &str) -> String {
     }
     path.to_string()
 }
-
 
 fn ask_for_custom_keypair() -> Option<String> {
     loop {
@@ -367,7 +365,7 @@ async fn run_command(
     unsecure_conn: bool,
     selection: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-        match command {
+    match command {
         Some(Commands::Mine(args)) => {
             mine(args, key, base_url, unsecure_conn).await;
         },
@@ -387,20 +385,24 @@ async fn run_command(
             if let Some(choice) = selection {
                 match choice {
                     "  Mine" => {
-                        let threads: u32 = loop {
+                        let (threads, buffer): (u32, u32) = loop {
                             let input = Text::new("Enter the number of threads:")
                                 .with_default("4")
                                 .prompt()?;
-            
-                            match input.trim().parse::<u32>() {
-                                Ok(valid_threads) if valid_threads > 0 => break valid_threads,
+                            
+                            let buffer_input = Text::new("Enter the buffer time in seconds (optional):")
+                                .with_default("0")
+                                .prompt()?;
+
+                            match (input.trim().parse::<u32>(), buffer_input.trim().parse::<u32>()) {
+                                (Ok(valid_threads), Ok(valid_buffer)) if valid_threads > 0 => break (valid_threads, valid_buffer),
                                 _ => {
-                                    println!("Invalid input. Please enter a valid number greater than 0.");
+                                    println!("Invalid input. Please enter valid numbers greater than 0.");
                                 }
                             }
                         };
             
-                        let args = MineArgs { threads };
+                        let args = MineArgs { threads, buffer };
                         mine(args, key, base_url, unsecure_conn).await;
                     },
                     "  ProtoMine" => {

@@ -24,6 +24,13 @@ pub struct MineArgs {
         help = "Number of threads to use while mining"
     )]
     pub threads: u32,
+    #[arg(
+        long,
+        value_name = "BUFFER",
+        default_value = "0",
+        help = "Buffer time in seconds, to send the submission to the server earlier"
+    )]
+    pub buffer: u32,
 }
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
@@ -133,9 +140,15 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                     if !running.load(Ordering::SeqCst) {
                         break;
                     }
-
+                
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
+                            // Adjust the cutoff with the buffer
+                            let mut cutoff = cutoff.saturating_sub(args.buffer as u64);
+                            if cutoff > 60 {
+                                cutoff = 55;
+                            }
+                
                             // Wait for 3 seconds before showing the progress bar
                             tokio::time::sleep(Duration::from_secs(3)).await;
 
