@@ -138,8 +138,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Challenge: {}", BASE64_STANDARD.encode(challenge));
 
                             let mut cutoff = cutoff.saturating_sub(args.buffer as u64);
-                            if args.buffer as u64 > cutoff {
-                                cutoff = 0;
+                            if cutoff > 60 {
+                                cutoff = 55;
                             }
                             println!("Cutoff in : {}s", cutoff);
 
