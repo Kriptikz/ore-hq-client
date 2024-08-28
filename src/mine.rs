@@ -137,7 +137,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             println!("Challenge: {}", BASE64_STANDARD.encode(challenge));
 
-                            let cutoff = cutoff.saturating_sub(args.buffer as u64);
+                            let mut cutoff = cutoff.saturating_sub(args.buffer as u64);
+                            if args.buffer as u64 > cutoff {
+                                cutoff = 0;
+                            }
                             println!("Cutoff in : {}s", cutoff);
 
                             let hash_timer = Instant::now();
