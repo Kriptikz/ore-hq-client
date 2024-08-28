@@ -22,6 +22,13 @@ pub struct MineArgs {
         help = "Number of cores to use while mining"
     )]
     pub cores: u32,
+    #[arg(
+        long,
+        value_name = "BUFFER",
+        default_value = "0",
+        help = "Buffer time in seconds, to send the submission to the server earlier"
+    )]
+    pub buffer: u32,
 }
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
@@ -128,6 +135,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Received start mining message!");
                             println!("Mining starting...");
                             println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
+                            println!("Challenge: {}", BASE64_STANDARD.encode(challenge));
+
+                            let cutoff = cutoff.saturating_sub(args.buffer as u64);
+                            println!("Cutoff in : {}s", cutoff);
+
                             let hash_timer = Instant::now();
                             let core_ids = core_affinity::get_core_ids().unwrap();
                             let nonces_per_thread = 10_000;
@@ -237,7 +249,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 let _ = message_sender.send(Message::Binary(bin_vec)).await;
                             }
 
-                            tokio::time::sleep(Duration::from_secs(3)).await;
+                            tokio::time::sleep(Duration::from_secs(5 + args.buffer as u64)).await;
 
                             let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
