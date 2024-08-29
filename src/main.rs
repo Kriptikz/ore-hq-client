@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use inquire::{Text, Confirm, Select};
 use dirs::home_dir;
 use std::path::PathBuf;
-use std::io::{self, Read, Write, BufRead};
+use std::io::{self, Write, BufRead};
 use solana_sdk::signature::read_keypair_file;
 use signup::signup;
 use claim::ClaimArgs;
@@ -106,23 +106,6 @@ async fn main() {
             println!("An error occurred, returning to the main menu...");
         }
     }
-}
-
-fn check_for_missing_args(args: &Args) -> bool {
-    // If keypair is provided and a command is also provided, no need to prompt for anything
-    if !args.keypair.is_empty() && args.command.is_some() {
-        return false;
-    }
-
-    // If keypair is missing, or command is provided but incomplete (like missing threads for mining), return true
-    if args.keypair.is_empty() || args.command.is_none() {
-        return true;
-    }
-
-    if let Some(Commands::Mine(mine_args)) = &args.command {
-        return mine_args.threads == 0;
-    }
-    false
 }
 
 fn get_keypair_path(default_keypair: &str) -> Option<String> {
