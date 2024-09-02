@@ -27,7 +27,7 @@ rayon = "1.10"
 crossbeam = "0.8.0"
 rand = "0.8.4"
 rand_chacha = "0.3.0"
-ore-miner-delegation = { version = "0.2.0", features = ["no-entrypoint"] }
+ore-miner-delegation = { version = "0.4.0", features = ["no-entrypoint"] }
 
 [profile.release]
 opt-level = 3     # Full optimisations
