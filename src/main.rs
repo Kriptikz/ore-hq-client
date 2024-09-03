@@ -1,8 +1,10 @@
 use claim::ClaimArgs;
+use delegate_stake::StakeArgs;
 use solana_sdk::signature::read_keypair_file;
 use clap::{Parser, Subcommand};
 
 use signup::signup;
+use undelegate_stake::UnstakeArgs;
 
 mod signup;
 mod protomine;
@@ -10,6 +12,9 @@ mod mine;
 mod claim;
 mod balance;
 mod rewards;
+mod delegate_stake;
+mod stake_balance;
+mod undelegate_stake;
 
 // --------------------------------
 
@@ -58,6 +63,12 @@ enum Commands {
     Rewards,
     #[command(about = "Display current ore token balance.")]
     Balance,
+    #[command(about = "Delegate stake for the pool miner.")]
+    Stake(StakeArgs),
+    #[command(about = "Delegated stake balance.")]
+    StakeBalance,
+    #[command(about = "Undelegate stake from the pool miner.")]
+    Unstake(UnstakeArgs),
 }
 
 // --------------------------------
@@ -89,8 +100,15 @@ async fn main() {
         Commands::Balance => {
             balance::balance(key, base_url, unsecure_conn).await;
         }
+        Commands::Stake(args) => {
+            delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
+        }
+        Commands::StakeBalance => {
+            stake_balance::stake_balance(key, base_url, unsecure_conn).await;
+        }
+        Commands::Unstake(args) => {
+            undelegate_stake::undelegate_stake(args, key, base_url, unsecure_conn).await;
+        }
     }
-
-
 }
 

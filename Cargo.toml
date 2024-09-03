@@ -12,13 +12,14 @@ base64 = "0.22.1"
 bincode = "1.3.3"
 clap = { version = "4.5.13", features = ["derive"] }
 core_affinity = "0.8.1"
-ore-api = "=2.1.6"
-ore-utils = "=2.1.6"
+ore-api = "2.1.8"
+ore-utils = "2.1.8"
 drillx_2 = "1.0.0"
 futures-util = "0.3.30"
 reqwest = "^0.11.0"
 rpassword = "7.3.1"
-solana-sdk = "2.0.6"
+solana-sdk = "1.18.21"
+spl-associated-token-account = { version = "2.2", features = ["no-entrypoint"] }
 tokio = { version = "1.39.2", features = ["full"] }
 tokio-tungstenite = { version = "0.23.1", features = ["native-tls"] }
 url = "2.5.2"
@@ -27,6 +28,7 @@ rayon = "1.10"
 crossbeam = "0.8.0"
 rand = "0.8.4"
 rand_chacha = "0.3.0"
+ore-miner-delegation = { version = "0.4.0", features = ["no-entrypoint"] }
 
 [profile.release]
 opt-level = 3     # Full optimisations
