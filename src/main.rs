@@ -4,6 +4,7 @@ use solana_sdk::signature::read_keypair_file;
 use clap::{Parser, Subcommand};
 
 use signup::signup;
+use undelegate_stake::UnstakeArgs;
 
 mod signup;
 mod protomine;
@@ -13,6 +14,7 @@ mod balance;
 mod rewards;
 mod delegate_stake;
 mod stake_balance;
+mod undelegate_stake;
 
 // --------------------------------
 
@@ -65,6 +67,8 @@ enum Commands {
     Stake(StakeArgs),
     #[command(about = "Delegated stake balance.")]
     StakeBalance,
+    #[command(about = "Undelegate stake from the pool miner.")]
+    Unstake(UnstakeArgs),
 }
 
 // --------------------------------
@@ -102,8 +106,9 @@ async fn main() {
         Commands::StakeBalance => {
             stake_balance::stake_balance(key, base_url, unsecure_conn).await;
         }
+        Commands::Unstake(args) => {
+            undelegate_stake::undelegate_stake(args, key, base_url, unsecure_conn).await;
+        }
     }
-
-
 }
 

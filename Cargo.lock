@@ -1917,6 +1917,7 @@ dependencies = [
  "reqwest",
  "rpassword",
  "solana-sdk",
+ "spl-associated-token-account 2.3.0",
  "spl-token 6.0.0",
  "tokio",
  "tokio-tungstenite",
