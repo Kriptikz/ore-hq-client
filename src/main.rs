@@ -1,4 +1,5 @@
 use claim::ClaimArgs;
+use delegate_stake::StakeArgs;
 use solana_sdk::signature::read_keypair_file;
 use clap::{Parser, Subcommand};
 
@@ -10,6 +11,8 @@ mod mine;
 mod claim;
 mod balance;
 mod rewards;
+mod delegate_stake;
+mod stake_balance;
 
 // --------------------------------
 
@@ -58,6 +61,10 @@ enum Commands {
     Rewards,
     #[command(about = "Display current ore token balance.")]
     Balance,
+    #[command(about = "Delegate stake for the pool miner.")]
+    Stake(StakeArgs),
+    #[command(about = "Delegated stake balance.")]
+    StakeBalance,
 }
 
 // --------------------------------
@@ -88,6 +95,12 @@ async fn main() {
         }
         Commands::Balance => {
             balance::balance(key, base_url, unsecure_conn).await;
+        }
+        Commands::Stake(args) => {
+            delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
+        }
+        Commands::StakeBalance => {
+            stake_balance::stake_balance(key, base_url, unsecure_conn).await;
         }
     }
 
