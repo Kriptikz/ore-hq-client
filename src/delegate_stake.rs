@@ -147,9 +147,6 @@ pub async fn delegate_stake(args: StakeArgs, key: Keypair, url: String, unsecure
                 "SUCCESS" => {
                     println!("Successfully staked!");
                 },
-                "EXISTS" => {
-                    println!("You're already signed up!");
-                }
                 other => {
                     println!("Transaction failed: {}", other);
                 }
