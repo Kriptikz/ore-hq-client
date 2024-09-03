@@ -10,7 +10,6 @@ pub struct StakeArgs {
     #[arg(
         long,
         value_name = "AMOUNT",
-        default_value = "0.00",
         help = "Amount of ore to stake."
     )]
     pub amount: f64,
