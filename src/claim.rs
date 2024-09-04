@@ -11,7 +11,7 @@ pub struct ClaimArgs {
         long,
         value_name = "AMOUNT",
         default_value = "0.00",
-        help = "Amount of ore to claim.(minimum of 0.0005)"
+        help = "Amount of ore to claim.(minimum of 0.005)"
     )]
     pub amount: f64,
 }
@@ -98,8 +98,8 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
                         println!("Claim is already queued for processing.");
                         break;
                     },
-                    "claim minimum is 0.0005" => {
-                        println!("Minimum claim amount is 0.0005.");
+                    "claim minimum is 0.005" => {
+                        println!("Minimum claim amount is 0.005.");
                         break;
                     }
                     other => {
