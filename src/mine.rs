@@ -65,21 +65,21 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 if let Ok(ts) = ts.parse::<u64>() {
                     ts
                 } else {
-                    println!("Server response body for /timestamp failed to parse, contact admin.");
+                    println!("  Server response body for /timestamp failed to parse, contact admin.");
                     tokio::time::sleep(Duration::from_secs(3)).await;
                     continue;
                 }
             } else {
-                println!("Server response body for /timestamp is empty, contact admin.");
+                println!("  Server response body for /timestamp is empty, contact admin.");
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 continue;
             }
         } else {
-            println!("Server restarting, trying again in 3 seconds...");
+            println!("  Server restarting, trying again in 3 seconds...");
             tokio::time::sleep(Duration::from_secs(3)).await;
             continue;
         };
-        println!("Server Timestamp: {}", timestamp);
+        println!("  Server Timestamp: {}", timestamp);
 
         let ts_msg = timestamp.to_le_bytes();
         let sig = key.sign_message(&ts_msg);
@@ -91,7 +91,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
         let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
 
-        println!("Connecting to server...");
+        println!("  Connecting to server...");
         let request = Request::builder()
             .method("GET")
             .uri(url.to_string())
@@ -106,7 +106,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
         match connect_async(request).await {
             Ok((ws_stream, _)) => {
-                println!("Connected to network!");
+                println!("  Connected to network!");
 
                 let (mut sender, mut receiver) = ws_stream.split();
                 let (message_sender, mut message_receiver) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
@@ -258,12 +258,12 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                             // Stop the spinner after mining is done
                             pb.finish_and_clear();
-                            println!("✔ Mining complete!");
-                            println!("Processed: {}", total_nonces_checked);
-                            println!("Hash time: {:?}", hash_time);
+                            println!("  ✔ Mining complete!");
+                            println!("  Processed: {}", total_nonces_checked);
+                            println!("  Hash time: {:?}", hash_time);
                             let hash_time_secs = hash_time.as_secs();
                             if hash_time_secs > 0 {
-                                println!("Hashpower: {:?} H/s", total_nonces_checked.saturating_div(hash_time_secs));
+                                println!("  Hashpower: {:?} H/s", total_nonces_checked.saturating_div(hash_time_secs));
                             }
 
                             // Send results to the server
@@ -315,13 +315,13 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 match e {
                     tokio_tungstenite::tungstenite::Error::Http(e) => {
                         if let Some(body) = e.body() {
-                            println!("Error: {:?}", String::from_utf8(body.to_vec()));
+                            println!("  Error: {:?}", String::from_utf8(body.to_vec()));
                         } else {
-                            println!("Http Error: {:?}", e);
+                            println!("  Http Error: {:?}", e);
                         }
                     }, 
                     _ => {
-                        println!("Error: {:?}", e);
+                        println!("  Error: {:?}", e);
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(3)).await;
@@ -333,14 +333,14 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t)=>{
-            println!("{}",t);
+            println!("  {}",t);
         },
         Message::Binary(b) => {
             let message_type = b[0];
             match message_type {
                 0 => {
                     if b.len() < 49 {
-                        println!("Invalid data for Message StartMining");
+                        println!("  Invalid data for Message StartMining");
                     } else {
                         let mut hash_bytes = [0u8; 32];
                         // extract 256 bytes (32 u8's) from data for hash
@@ -377,14 +377,14 @@ fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>
                     }
                 },
                 _ => {
-                    println!("Failed to parse server message type");
+                    println!("  Failed to parse server message type");
                 }
             }
         },
         Message::Ping(_) => {}, 
         Message::Pong(_) => {}, 
         Message::Close(v) => {
-            println!("Got Close: {:?}", v);
+            println!("  Got Close: {:?}", v);
             return ControlFlow::Break(());
         }, 
         _ => {}

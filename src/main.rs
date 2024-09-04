@@ -16,6 +16,9 @@ mod protomine;
 mod mine;
 mod claim;
 mod balance;
+mod delegate_stake;
+mod stake_balance;
+mod undelegate_stake;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -63,6 +66,21 @@ enum Commands {
     Claim(ClaimArgs),
     #[command(about = "Display current ore token balance.")]
     Balance,
+    #[command(about = "Manage staking options.")]
+    StakeOre {
+        #[command(subcommand)]
+        subcommand: StakeCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum StakeCommands {
+    #[command(about = "Delegate stake for the pool miner.")]
+    Stake(delegate_stake::StakeArgs),
+    #[command(about = "Undelegate stake from the pool miner.")]
+    Unstake(undelegate_stake::UnstakeArgs),
+    #[command(about = "Delegated stake balance.")]
+    StakeBalance,
 }
 
 #[tokio::main]
@@ -92,18 +110,18 @@ async fn main() {
         if let Some(command) = args.command {
             // A valid command is provided, execute it directly
             if let Err(_) = run_command(Some(command), key, args.url, args.use_http, None).await {
-                println!("An error occurred while executing the command.");
+                println!("  An error occurred while executing the command.");
             }
         } else {
             // No command provided, run the menu
             if let Err(_) = run_menu().await {
-                println!("An error occurred, returning to the main menu...");
+                println!("  An error occurred, returning to the main menu...");
             }
         }
     } else {
         // The keypair does not exist, proceed directly to the menu without showing an error
         if let Err(_) = run_menu().await {
-            println!("An error occurred, returning to the main menu...");
+            println!("  An error occurred, returning to the main menu...");
         }
     }
 }
@@ -117,7 +135,7 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
         let file = match fs::File::open(&config_path) {
             Ok(f) => f,
             Err(_) => {
-                println!("Failed to open configuration file.");
+                println!("  Failed to open configuration file.");
                 return ask_for_custom_keypair();
             }
         };
@@ -178,10 +196,10 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
     keypair_paths.push("  Remove".to_string());
 
     loop {
-        let selection = match Select::new("Select a keypair to use or manage:", keypair_paths.clone()).prompt() {
+        let selection = match Select::new("  Select a keypair to use or manage:", keypair_paths.clone()).prompt() {
             Ok(s) => s,
             Err(_) => {
-                println!("Failed to prompt for keypair selection.");
+                println!("  Failed to prompt for keypair selection.");
                 continue;
             }
         };
@@ -198,11 +216,11 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
                     if load_keypair(&selected_path).is_some() {
                         return Some(selected_path);
                     } else {
-                        println!("Please select a valid keypair.");
+                        println!("  Please select a valid keypair.");
                         continue;
                     }
                 } else {
-                    println!("The specified keypair path does not exist. Please enter a valid path.");
+                    println!("  The specified keypair path does not exist. Please enter a valid path.");
                     return ask_for_custom_keypair();
                 }
             }
@@ -217,7 +235,7 @@ fn remove_keypair() {
     let solana_default_keypair = expand_tilde("~/.config/solana/id.json");
 
     if config_path.exists() {
-        let file = fs::File::open(&config_path).expect("Failed to open configuration file.");
+        let file = fs::File::open(&config_path).expect("  Failed to open configuration file.");
         let reader = io::BufReader::new(file);
 
         for line in reader.lines() {
@@ -230,17 +248,17 @@ fn remove_keypair() {
     }
 
     if keypair_paths.is_empty() {
-        println!("No keypairs available to remove.");
+        println!("  No keypairs available to remove.");
         return;
     }
 
-    let selection = Select::new("Select a keypair to remove:", keypair_paths.clone())
+    let selection = Select::new("  Select a keypair to remove:", keypair_paths.clone())
         .prompt()
-        .expect("Failed to prompt for keypair removal.");
+        .expect("  Failed to prompt for keypair removal.");
 
     // Check if the user is trying to remove the default keypair
     if selection == replace_home_with_tilde(&solana_default_keypair) {
-        println!("Removal of the default keypair (id.json) is not allowed.");
+        println!("  Removal of the default keypair (id.json) is not allowed.");
         return;
     }
 
@@ -256,7 +274,7 @@ fn remove_keypair() {
         writeln!(file, "{}", expanded_path).expect("Failed to write keypair path to configuration file.");
     }
 
-    println!("Keypair path '{}' has been removed.", selection);
+    println!("  Keypair path '{}' has been removed.", selection);
 }
 
 
@@ -281,7 +299,7 @@ fn expand_tilde(path: &str) -> String {
 
 fn ask_for_custom_keypair() -> Option<String> {
     loop {
-        let custom_path = Text::new("Enter the path to your keypair or keypair directory:")
+        let custom_path = Text::new("  Enter the path to your keypair or keypair directory:")
             .prompt()
             .expect("Failed to get keypair path.");
 
@@ -289,7 +307,7 @@ fn ask_for_custom_keypair() -> Option<String> {
         let custom_path_exists = PathBuf::from(&expanded_path).exists();
 
         if !custom_path_exists {
-            println!("The specified keypair path does not exist.");
+            println!("  The specified keypair path does not exist.");
             continue;
         }
 
@@ -308,7 +326,7 @@ fn ask_for_custom_keypair() -> Option<String> {
             }
 
             if keypair_files.is_empty() {
-                println!("No .json keypair files found in the specified directory.");
+                println!("  No .json keypair files found in the specified directory.");
                 continue;
             }
 
@@ -331,12 +349,12 @@ fn ask_for_custom_keypair() -> Option<String> {
             let new_count = keypair_files.len();
 
             println!(
-                "Found {} keypair file(s) in the directory. After removing duplicates, {} new keypair file(s) remain.",
+                "  Found {} keypair file(s) in the directory. After removing duplicates, {} new keypair file(s) remain.",
                 original_count, new_count
             );
 
             if keypair_files.is_empty() {
-                println!("No new keypair files to add or select. Returning to the previous menu.");
+                println!("  No new keypair files to add or select. Returning to the previous menu.");
                 return None;  // Returning `None` to indicate no new keypairs were selected
             }
 
@@ -351,7 +369,7 @@ fn ask_for_custom_keypair() -> Option<String> {
             }
 
             // Prompt the user to select a keypair from the directory
-            let selection = Select::new("Select a keypair to use from the directory:", keypair_files.clone())
+            let selection = Select::new("  Select a keypair to use from the directory:", keypair_files.clone())
                 .prompt()
                 .expect("Failed to prompt for keypair selection.");
 
@@ -360,20 +378,20 @@ fn ask_for_custom_keypair() -> Option<String> {
                 if load_keypair(&selected_path).is_some() {
                     return Some(selected_path);
                 } else {
-                    println!("Please select a valid keypair.");
+                    println!("  Please select a valid keypair.");
                     continue;
                 }
             } else {
-                println!("The specified keypair path does not exist. Please enter a valid path.");
+                println!("  The specified keypair path does not exist. Please enter a valid path.");
                 continue;
             }
         } else {
             if check_keypair_exists(&expanded_path) {
-                println!("The keypair path '{}' already exists in the configuration file. Please provide a new one.", custom_path);
+                println!("  The keypair path '{}' already exists in the configuration file. Please provide a new one.", custom_path);
                 continue;
             }
 
-            let add_to_list = Confirm::new("Would you like to add this keypair path to the configuration file?")
+            let add_to_list = Confirm::new("  Would you like to add this keypair path to the configuration file?")
                 .with_default(true)
                 .prompt()
                 .unwrap_or(true);
@@ -423,10 +441,44 @@ fn load_keypair(keypair_path: &str) -> Option<solana_sdk::signature::Keypair> {
     match result {
         Ok(Ok(keypair)) => Some(keypair),
         Ok(Err(_)) | Err(_) => {
-            println!("Failed to load keypair from file: {}", keypair_path);
+            println!("  Failed to load keypair from file: {}", keypair_path);
             None
         }
     }
+}
+
+fn ask_for_stake_amount() -> f64 {
+    loop {
+        let input = Text::new("  Enter the amount of ore to stake:")
+            .prompt();
+
+        match input {
+            Ok(amount_str) => {
+                match amount_str.trim().parse::<f64>() {
+                    Ok(amount) if amount > 0.0 && has_valid_decimal_places(amount_str.trim(), 8) => {
+                        return amount;
+                    }
+                    Ok(_) => {
+                        println!("  Please enter a valid number greater than 0 with up to 8 decimal places.");
+                    }
+                    Err(_) => {
+                        println!("  Please enter a valid number.");
+                    }
+                }
+            }
+            Err(_) => {
+                println!("  An error occurred. Please try again.");
+            }
+        }
+    }
+}
+
+fn has_valid_decimal_places(amount_str: &str, max_decimals: usize) -> bool {
+    if let Some(dot_index) = amount_str.find('.') {
+        let decimal_places = amount_str.len() - dot_index - 1;
+        return decimal_places <= max_decimals;
+    }
+    true
 }
 
 async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
@@ -439,7 +491,9 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
         "  Sign up",
         "  Claim Rewards",
         "  View Balances",
-        "  Stake Ore",
+        "  Stake",
+        "  Unstake",
+        "  Stake Balance",
         "  Exit",
     ];
 
@@ -459,13 +513,8 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     }
 
-    if selection == Some("  Stake Ore") {
-        println!("  Coming soon!");
-        return Ok(());
-    }
-
     let base_url = if args.url == "ec1ipse.me" {
-        let url_input = Text::new("Please enter the server URL:")
+        let url_input = Text::new("  Please enter the server URL:")
             .with_default("ec1ipse.me")
             .prompt()
             .unwrap_or_else(|_| "ec1ipse.me".to_string());
@@ -479,16 +528,16 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     let keypair_path = loop {
         match get_keypair_path(&args.keypair) {
             Some(path) => break path,
-            None => println!("Failed to get keypair path. Please try again."),
+            None => println!("  Failed to get keypair path. Please try again."),
         }
     };
 
     let key = load_keypair(&keypair_path).unwrap_or_else(|| {
-        println!("Returning to keypair selection.");
+        println!("  Returning to keypair selection.");
         std::process::exit(1);
     });
 
-    run_command(args.command, key, base_url, unsecure_conn, selection).await?;
+    run_command(args.command, key, base_url, unsecure_conn, selection.as_deref()).await?;
     Ok(())
 }
 
@@ -515,23 +564,34 @@ async fn run_command(
         Some(Commands::Balance) => {
             balance(&key, base_url, unsecure_conn).await;
         },
+        Some(Commands::StakeOre { subcommand }) => match subcommand {
+            StakeCommands::Stake(args) => {
+                delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
+            },
+            StakeCommands::Unstake(args) => {
+                undelegate_stake::undelegate_stake(args, key, base_url, unsecure_conn).await;
+            },
+            StakeCommands::StakeBalance => {
+                stake_balance::stake_balance(key, base_url, unsecure_conn).await;
+            },
+        },
         None => {
             if let Some(choice) = selection {
                 match choice {
                     "  Mine" => {
                         let (threads, buffer): (u32, u32) = loop {
-                            let input = Text::new("Enter the number of threads:")
+                            let input = Text::new("  Enter the number of threads:")
                                 .with_default("4")
                                 .prompt()?;
                             
-                            let buffer_input = Text::new("Enter the buffer time in seconds (optional):")
+                            let buffer_input = Text::new("  Enter the buffer time in seconds (optional):")
                                 .with_default("0")
                                 .prompt()?;
 
                             match (input.trim().parse::<u32>(), buffer_input.trim().parse::<u32>()) {
                                 (Ok(valid_threads), Ok(valid_buffer)) if valid_threads > 0 => break (valid_threads, valid_buffer),
                                 _ => {
-                                    println!("Invalid input. Please enter valid numbers greater than 0.");
+                                    println!("  Invalid input. Please enter valid numbers greater than 0.");
                                 }
                             }
                         };
@@ -541,21 +601,21 @@ async fn run_command(
                     },
                     "  ProtoMine" => {
                         let threads: u32 = loop {
-                            let input = Text::new("Enter the number of threads:")
+                            let input = Text::new("  Enter the number of threads:")
                                 .with_default("4")
                                 .prompt()?;
             
                             match input.trim().parse::<u32>() {
                                 Ok(valid_threads) if valid_threads > 0 => break valid_threads,
                                 _ => {
-                                    println!("Invalid input. Please enter a valid number greater than 0.");
+                                    println!("  Invalid input. Please enter a valid number greater than 0.");
                                 }
                             }
                         };
             
                         let args = ProtoMineArgs { threads: threads.try_into().unwrap() };
                         protomine(args, key, base_url, unsecure_conn).await;
-                    },            
+                    },
                     "  Sign up" => {
                         signup(base_url, key, unsecure_conn).await;
                     },
@@ -566,10 +626,58 @@ async fn run_command(
                     "  View Balances" => {
                         balance(&key, base_url, unsecure_conn).await;
                     },
-                    "  Stake Ore" => {
-                        println!("Coming soon!");
+                    "  Stake" => {
+                        let stake_mode = Select::new("  Choose your staking mode:", vec!["  Manual", "  Auto"])
+                            .prompt()
+                            .expect("Failed to prompt for staking mode.");
+                        
+                        let stake_amount = ask_for_stake_amount();  // Call the new function to get the valid stake amount
+                        
+                        let auto_stake = match stake_mode {
+                            "  Auto" => true,
+                            _ => false,
+                        };
+
+                        let args = delegate_stake::StakeArgs {
+                            amount: stake_amount,
+                            auto: auto_stake,
+                        };
+
+                        delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
                     },
-                    _ => println!("Unknown selection."),
+                    "  Unstake" => {
+                        loop {
+                            let unstake_input = Text::new("  Enter the amount of ore to unstake:")
+                                .prompt();
+
+                            match unstake_input {
+                                Ok(input) => {
+                                    match input.trim().parse::<f64>() {
+                                        Ok(unstake_amount) if unstake_amount > 0.0 => {
+                                            let args = undelegate_stake::UnstakeArgs {
+                                                amount: unstake_amount,
+                                            };
+                                            undelegate_stake::undelegate_stake(args, key, base_url, unsecure_conn).await;
+                                            break;
+                                        }
+                                        Ok(_) => {
+                                            println!("  Please enter a valid number greater than 0.");
+                                        }
+                                        Err(_) => {
+                                            println!("  Please enter a valid number.");
+                                        }
+                                    }
+                                },
+                                Err(_) => {
+                                    println!("  Invalid input. Please try again.");
+                                }
+                            }
+                        }
+                    },
+                    "  Stake Balance" => {
+                        stake_balance::stake_balance(key, base_url, unsecure_conn).await;
+                    },
+                    _ => println!("  Unknown selection."),
                 }
             }
         },

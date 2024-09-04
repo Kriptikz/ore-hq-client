@@ -64,15 +64,15 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     };
 
     println!();
-    println!("Unclaimed Rewards: {:.11} ORE", rewards);
-    println!("Wallet Balance:    {:.11} ORE", balance);
+    println!("  Unclaimed Rewards: {:.11} ORE", rewards);
+    println!("  Wallet Balance:    {:.11} ORE", balance);
 
     // Convert balance to grains
     let balance_grains = (rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
 
     // If balance is zero, inform the user and return to keypair selection
     if balance_grains == 0 {
-        println!("\nThere is no balance to claim.");
+        println!("\n  There is no balance to claim.");
         prompt_to_continue(); // Pause before returning
         return;
     }
@@ -90,7 +90,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         match input.trim().parse::<f64>() {
             Ok(val) => val,
             Err(_) => {
-                println!("Please enter a valid number.");
+                println!("  Please enter a valid number.");
                 prompt_to_continue(); // Pause before returning
                 return;
             }
@@ -102,7 +102,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
 
     // Handle the case where the claim amount is zero
     if claim_amount_grains == 0 {
-        println!("You entered 0 rewards to claim, so no claim will be made.");
+        println!("  You entered 0 rewards to claim, so no claim will be made.");
         prompt_to_continue(); // Pause before returning
         return;
     }
@@ -110,11 +110,11 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     // Ensure the claim amount does not exceed the available balance
     if claim_amount_grains > balance_grains {
         println!(
-            "You do not have enough rewards to claim {} ORE.",
+            "  You do not have enough rewards to claim {} ORE.",
             amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
         );
         println!(
-            "Please enter an amount less than or equal to {} ORE.",
+            "  Please enter an amount less than or equal to {} ORE.",
             amount_to_ui_amount(balance_grains, ore_api::consts::TOKEN_DECIMALS)
         );
         prompt_to_continue(); // Pause before returning
@@ -125,7 +125,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     println!(
         "{}",
         format!(
-            "Are you sure you want to claim {} ORE? (Y/n)",
+            "  Are you sure you want to claim {} ORE? (Y/n)",
             amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
         )
         .red()
@@ -137,13 +137,13 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
 
     let confirm = confirm.trim().to_lowercase();
     if confirm != "y" && !confirm.is_empty() && confirm != "yes" {
-        println!("Claim cancelled.");
+        println!("  Claim cancelled.");
         prompt_to_continue(); // Pause before returning
         return;
     }
 
     println!(
-        "Sending claim request for amount {}...",
+        "  Sending claim request for amount {}...",
         amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
     );
     let resp = client
@@ -161,10 +161,10 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         Ok(res) => {
             match res.text().await.unwrap().as_str() {
                 "SUCCESS" => {
-                    println!("Successfully claimed rewards!");
+                    println!("  Successfully claimed rewards!");
                 },
                 "QUEUED" => {
-                    println!("Claim is already queued for processing.");
+                    println!("  Claim is already queued for processing.");
                 },
                 other => {
                     if let Ok(time) = other.parse::<u64>() {
@@ -172,19 +172,19 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
                         let secs = time_left % 60;
                         let mins = (time_left / 60) % 60;
                         println!(
-                            "You cannot claim until the time is up. Time left until next claim available: {}m {}s",
+                            "  You cannot claim until the time is up. Time left until next claim available: {}m {}s",
                             mins, secs
                         );
                     } else {
-                        println!("Unexpected response: {}", other);
+                        println!("  Unexpected response: {}", other);
                     }
                 }
             }
         }
 
         Err(e) => {
-            println!("ERROR: {}", e);
-            println!("Retrying in 5 seconds...");
+            println!("  ERROR: {}", e);
+            println!("  Retrying in 5 seconds...");
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
@@ -194,6 +194,6 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
 
 fn prompt_to_continue() {
     sleep(Duration::from_millis(100));
-    println!("\nPress any key to continue...");
+    println!("\n  Press any key to continue...");
     let _ = io::stdin().read(&mut [0u8]).unwrap();
 }
