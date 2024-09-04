@@ -57,11 +57,4 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
     } else {
         println!("\n  Transaction failed, please wait and try again.");
     }
-    prompt_to_continue();
-}
-
-fn prompt_to_continue() {
-    sleep(Duration::from_millis(100));
-    println!("\n  Press any key to continue...");
-    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
 }

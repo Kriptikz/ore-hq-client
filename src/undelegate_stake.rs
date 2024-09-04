@@ -16,7 +16,7 @@ pub struct UnstakeArgs {
 }
 
 
-pub async fn undelegate_stake(args: UnstakeArgs, key: Keypair, url: String, unsecure: bool) {
+pub async fn undelegate_stake(args: UnstakeArgs, key: &Keypair, url: String, unsecure: bool) {
     let base_url = url;
 
     let client = reqwest::Client::new();

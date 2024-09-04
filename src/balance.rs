@@ -52,15 +52,12 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     };
 
     println!();
-    println!("Unclaimed Rewards: {:.11} ORE", rewards);
-    println!("Wallet Balance:    {:.11} ORE", balance);
-
-    // Pause after displaying balance and rewards information
-    prompt_to_continue();
+    println!("  Unclaimed Rewards: {:.11} ORE", rewards);
+    println!("  Wallet (Stakable): {:.11} ORE", balance);
 }
 
 fn prompt_to_continue() {
     sleep(Duration::from_millis(100));
-    println!("\nPress any key to continue...");
+    println!("\n  Press any key to continue...");
     let _ = std::io::stdin().read(&mut [0u8]).unwrap();
 }

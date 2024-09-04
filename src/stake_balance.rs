@@ -1,7 +1,7 @@
 use solana_sdk::{signature::Keypair, signer::Signer};
 use reqwest::Error;
 
-pub async fn stake_balance(key: Keypair, url: String, unsecure: bool) {
+pub async fn stake_balance(key: &Keypair, url: String, unsecure: bool) {
     let base_url = url;
     let client = reqwest::Client::new();
 

@@ -66,11 +66,12 @@ enum Commands {
     Claim(ClaimArgs),
     #[command(about = "Display current ore token balance.")]
     Balance,
-    #[command(about = "Manage staking options.")]
-    StakeOre {
-        #[command(subcommand)]
-        subcommand: StakeCommands,
-    },
+    #[command(about = "Delegate stake for the pool miner.")]
+    Stake(delegate_stake::StakeArgs),
+    #[command(about = "Undelegate stake from the pool miner.")]
+    Unstake(undelegate_stake::UnstakeArgs),
+    #[command(about = "Delegated stake balance.")]
+    StakeBalance,
 }
 
 #[derive(Debug, Subcommand)]
@@ -115,13 +116,13 @@ async fn main() {
         } else {
             // No command provided, run the menu
             if let Err(_) = run_menu().await {
-                println!("  An error occurred, returning to the main menu...");
+                println!("  An error occurred, exiting program.");
             }
         }
     } else {
         // The keypair does not exist, proceed directly to the menu without showing an error
         if let Err(_) = run_menu().await {
-            println!("  An error occurred, returning to the main menu...");
+            println!("  An error occurred, exiting program.");
         }
     }
 }
@@ -198,9 +199,13 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
     loop {
         let selection = match Select::new("  Select a keypair to use or manage:", keypair_paths.clone()).prompt() {
             Ok(s) => s,
+            Err(inquire::error::InquireError::OperationCanceled) => {
+                println!("  Operation canceled, exiting program.");
+                std::process::exit(0);
+            },
             Err(_) => {
                 println!("  Failed to prompt for keypair selection.");
-                continue;
+                return None;
             }
         };
 
@@ -252,9 +257,17 @@ fn remove_keypair() {
         return;
     }
 
-    let selection = Select::new("  Select a keypair to remove:", keypair_paths.clone())
-        .prompt()
-        .expect("  Failed to prompt for keypair removal.");
+    let selection = match Select::new("  Select a keypair to remove:", keypair_paths.clone()).prompt() {
+        Ok(s) => s,
+        Err(inquire::error::InquireError::OperationCanceled) => {
+            println!("  Operation canceled, exiting program.");
+            std::process::exit(0);
+        },
+        Err(_) => {
+            println!("  Failed to prompt for keypair removal.");
+            return;
+        }
+    };
 
     // Check if the user is trying to remove the default keypair
     if selection == replace_home_with_tilde(&solana_default_keypair) {
@@ -369,9 +382,18 @@ fn ask_for_custom_keypair() -> Option<String> {
             }
 
             // Prompt the user to select a keypair from the directory
-            let selection = Select::new("  Select a keypair to use from the directory:", keypair_files.clone())
-                .prompt()
-                .expect("Failed to prompt for keypair selection.");
+            let selection = match Select::new("  Select a keypair to use from the directory:", keypair_files.clone())
+                .prompt() {
+                Ok(s) => s,
+                Err(inquire::error::InquireError::OperationCanceled) => {
+                    println!("  Operation canceled, exiting program.");
+                    std::process::exit(0);
+                },
+                Err(_) => {
+                    println!("  Failed to prompt for keypair selection.");
+                    continue;
+                }
+            };
 
             let selected_path = expand_tilde(&selection);
             if PathBuf::from(&selected_path).exists() {
@@ -447,31 +469,6 @@ fn load_keypair(keypair_path: &str) -> Option<solana_sdk::signature::Keypair> {
     }
 }
 
-fn ask_for_stake_amount() -> f64 {
-    loop {
-        let input = Text::new("  Enter the amount of ore to stake:")
-            .prompt();
-
-        match input {
-            Ok(amount_str) => {
-                match amount_str.trim().parse::<f64>() {
-                    Ok(amount) if amount > 0.0 && has_valid_decimal_places(amount_str.trim(), 8) => {
-                        return amount;
-                    }
-                    Ok(_) => {
-                        println!("  Please enter a valid number greater than 0 with up to 8 decimal places.");
-                    }
-                    Err(_) => {
-                        println!("  Please enter a valid number.");
-                    }
-                }
-            }
-            Err(_) => {
-                println!("  An error occurred. Please try again.");
-            }
-        }
-    }
-}
 
 fn has_valid_decimal_places(amount_str: &str, max_decimals: usize) -> bool {
     if let Some(dot_index) = amount_str.find('.') {
@@ -501,12 +498,21 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
 
     let selection = match &args.command {
         Some(_) => None,
-        None => Select::new(
+        None => match Select::new(
             &format!("Welcome to Ec1ipse Ore HQ Client v{}, what would you like to do?", version), 
             options
         )
-        .prompt()
-        .ok(),
+        .prompt() {
+            Ok(s) => Some(s),
+            Err(inquire::error::InquireError::OperationCanceled) => {
+                println!("  Operation canceled, exiting program.");
+                std::process::exit(0);
+            },
+            Err(_) => {
+                println!("  Failed to prompt for selection.");
+                return Err("Failed to prompt for selection.".into());
+            }
+        },
     };
 
     if let Some("  Exit") = selection {
@@ -564,16 +570,14 @@ async fn run_command(
         Some(Commands::Balance) => {
             balance(&key, base_url, unsecure_conn).await;
         },
-        Some(Commands::StakeOre { subcommand }) => match subcommand {
-            StakeCommands::Stake(args) => {
-                delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
-            },
-            StakeCommands::Unstake(args) => {
-                undelegate_stake::undelegate_stake(args, key, base_url, unsecure_conn).await;
-            },
-            StakeCommands::StakeBalance => {
-                stake_balance::stake_balance(key, base_url, unsecure_conn).await;
-            },
+        Some(Commands::Stake(args)) => {
+            delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
+        },
+        Some(Commands::Unstake(args)) => {
+            undelegate_stake::undelegate_stake(args, &key, base_url, unsecure_conn).await;
+        },
+        Some(Commands::StakeBalance) => {
+            stake_balance::stake_balance(&key, base_url, unsecure_conn).await;
         },
         None => {
             if let Some(choice) = selection {
@@ -627,37 +631,45 @@ async fn run_command(
                         balance(&key, base_url, unsecure_conn).await;
                     },
                     "  Stake" => {
-                        let stake_mode = Select::new("  Choose your staking mode:", vec!["  Manual", "  Auto"])
-                            .prompt()
-                            .expect("Failed to prompt for staking mode.");
-                        
-                        let stake_amount = ask_for_stake_amount();  // Call the new function to get the valid stake amount
-                        
-                        let auto_stake = match stake_mode {
-                            "  Auto" => true,
-                            _ => false,
+                        balance(&key, base_url.clone(), unsecure_conn).await;
+
+                        let stake_mode = match Select::new("  Choose your staking mode:", vec!["  Manual", "  Auto"])
+                            .prompt() {
+                            Ok(s) => s,
+                            Err(inquire::error::InquireError::OperationCanceled) => {
+                                println!("  Operation canceled, exiting program.");
+                                std::process::exit(0);
+                            },
+                            Err(_) => {
+                                println!("  Failed to prompt for staking mode.");
+                                return Err("Failed to prompt for staking mode.".into());
+                            }
                         };
 
-                        let args = delegate_stake::StakeArgs {
-                            amount: stake_amount,
-                            auto: auto_stake,
-                        };
-
-                        delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
-                    },
-                    "  Unstake" => {
                         loop {
-                            let unstake_input = Text::new("  Enter the amount of ore to unstake:")
+                            let stake_input = Text::new("  Enter the amount of ore to stake (or 'esc' to cancel):")
                                 .prompt();
 
-                            match unstake_input {
+                            match stake_input {
                                 Ok(input) => {
-                                    match input.trim().parse::<f64>() {
-                                        Ok(unstake_amount) if unstake_amount > 0.0 => {
-                                            let args = undelegate_stake::UnstakeArgs {
-                                                amount: unstake_amount,
+                                    let input = input.trim();
+                                    if input.eq_ignore_ascii_case("esc") {
+                                        println!("  Staking operation canceled.");
+                                        break;
+                                    }
+
+                                    match input.parse::<f64>() {
+                                        Ok(stake_amount) if stake_amount > 0.0 => {
+                                            let auto_stake = match stake_mode {
+                                                "  Auto" => true,
+                                                _ => false,
                                             };
-                                            undelegate_stake::undelegate_stake(args, key, base_url, unsecure_conn).await;
+
+                                            let args = delegate_stake::StakeArgs {
+                                                amount: stake_amount,
+                                                auto: auto_stake,
+                                            };
+                                            delegate_stake::delegate_stake(args, key, base_url.clone(), unsecure_conn).await;
                                             break;
                                         }
                                         Ok(_) => {
@@ -668,6 +680,54 @@ async fn run_command(
                                         }
                                     }
                                 },
+                                Err(inquire::error::InquireError::OperationCanceled) => {
+                                    println!("  Staking operation canceled.");
+                                    break;
+                                },
+                                Err(_) => {
+                                    println!("  Invalid input. Please try again.");
+                                }
+                            }
+                        }
+                    },
+                    "  Unstake" => {
+                        // Fetch and display current staked balance before asking for unstake amount
+                        println!("  Fetching current staked balance...");
+                        println!();
+                        stake_balance::stake_balance(&key, base_url.clone(), unsecure_conn).await;
+
+                        loop {
+                            let unstake_input = Text::new("  Enter the amount of ore to unstake (or 'esc' to cancel):")
+                                .prompt();
+                        
+                            match unstake_input {
+                                Ok(input) => {
+                                    let input = input.trim();
+                                    if input.eq_ignore_ascii_case("esc") {
+                                        println!("  Unstaking operation canceled.");
+                                        break;
+                                    }
+
+                                    match input.parse::<f64>() {
+                                        Ok(unstake_amount) if unstake_amount > 0.0 => {
+                                            let args = undelegate_stake::UnstakeArgs {
+                                                amount: unstake_amount,
+                                            };
+                                            undelegate_stake::undelegate_stake(args, &key, base_url.clone(), unsecure_conn).await;
+                                            break;
+                                        }
+                                        Ok(_) => {
+                                            println!("  Please enter a valid number greater than 0.");
+                                        }
+                                        Err(_) => {
+                                            println!("  Please enter a valid number.");
+                                        }
+                                    }
+                                },
+                                Err(inquire::error::InquireError::OperationCanceled) => {
+                                    println!("  Unstaking operation canceled.");
+                                    break;
+                                },
                                 Err(_) => {
                                     println!("  Invalid input. Please try again.");
                                 }
@@ -675,7 +735,7 @@ async fn run_command(
                         }
                     },
                     "  Stake Balance" => {
-                        stake_balance::stake_balance(key, base_url, unsecure_conn).await;
+                        stake_balance::stake_balance(&key, base_url, unsecure_conn).await;
                     },
                     _ => println!("  Unknown selection."),
                 }
