@@ -180,6 +180,15 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
                 writeln!(file, "{}", expand_tilde(&path)).expect("Failed to write keypair path to configuration file.");
             }
         }
+        Commands::Stake(args) => {
+            delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
+        }
+        Commands::StakeBalance => {
+            stake_balance::stake_balance(key, base_url, unsecure_conn).await;
+        }
+        Commands::Unstake(args) => {
+            undelegate_stake::undelegate_stake(args, key, base_url, unsecure_conn).await;
+        }
     }
 
     // Hardcode check for the default Solana keypair

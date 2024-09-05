@@ -290,7 +290,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 let _ = message_sender.send(Message::Binary(bin_vec)).await;
                             }
 
-                            tokio::time::sleep(Duration::from_secs(3)).await;
+                            tokio::time::sleep(Duration::from_secs(5 + args.buffer as u64)).await;
 
                             let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
