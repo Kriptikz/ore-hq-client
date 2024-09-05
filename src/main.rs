@@ -633,18 +633,18 @@ async fn run_command(
                     "  Stake" => {
                         balance(&key, base_url.clone(), unsecure_conn).await;
 
-                        let stake_mode = match Select::new("  Choose your staking mode:", vec!["  Manual", "  Auto"])
-                            .prompt() {
-                            Ok(s) => s,
-                            Err(inquire::error::InquireError::OperationCanceled) => {
-                                println!("  Operation canceled, exiting program.");
-                                std::process::exit(0);
-                            },
-                            Err(_) => {
-                                println!("  Failed to prompt for staking mode.");
-                                return Err("Failed to prompt for staking mode.".into());
-                            }
-                        };
+                        let stake_mode = match Select::new("  Choose your staking mode:", vec!["  Auto", "  Manual"])
+                        .prompt() {
+                        Ok(s) => s,
+                        Err(inquire::error::InquireError::OperationCanceled) => {
+                            println!("  Operation canceled, exiting program.");
+                            std::process::exit(0);
+                        },
+                        Err(_) => {
+                            println!("  Failed to prompt for staking mode.");
+                            return Err("Failed to prompt for staking mode.".into());
+                        }
+                    };
 
                         loop {
                             let stake_input = Text::new("  Enter the amount of ore to stake (or 'esc' to cancel):")

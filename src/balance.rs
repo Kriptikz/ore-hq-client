@@ -61,3 +61,22 @@ fn prompt_to_continue() {
     println!("\n  Press any key to continue...");
     let _ = std::io::stdin().read(&mut [0u8]).unwrap();
 }
+
+pub async fn get_balance(key: &Keypair, url: String, unsecure: bool) -> f64 {
+    let client = reqwest::Client::new();
+    let url_prefix = if unsecure { "http" } else { "https" };
+
+    let balance_response = client
+        .get(format!(
+            "{}://{}/miner/balance?pubkey={}",
+            url_prefix, url, key.pubkey().to_string()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    balance_response.parse::<f64>().unwrap_or(0.0)
+}

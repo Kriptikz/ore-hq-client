@@ -63,13 +63,19 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     println!("  Unclaimed Rewards: {:.11} ORE", rewards);
     println!("  Wallet Balance:    {:.11} ORE", balance);
 
+    // Check if rewards are below the minimum claim amount
+    if rewards < 0.005 {
+        println!("\n  You have not reached the required claim limit of 0.005 ORE.");
+        println!("  Keep mining to accumulate more rewards before you can withdraw.");
+        return;  // Exit the function
+    }
+
     // Convert balance to grains
     let balance_grains = (rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
 
     // If balance is zero, inform the user and return to keypair selection
     if balance_grains == 0 {
         println!("\n  There is no balance to claim.");
-        prompt_to_continue(); // Pause before returning
         return;
     }
 
@@ -114,27 +120,59 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     }
 
     // Convert the claim amount to the smallest unit
-    let claim_amount_grains = (claim_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+    let mut claim_amount_grains = (claim_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
 
     // Handle the case where the claim amount is zero
     if claim_amount_grains == 0 {
         println!("  You entered 0 rewards to claim, so no claim will be made.");
-        prompt_to_continue();
         return;
     }
 
     // Ensure the claim amount does not exceed the available balance
-    if claim_amount_grains > balance_grains {
-        println!(
-            "  You do not have enough rewards to claim {} ORE.",
-            amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
-        );
-        println!(
-            "  Please enter an amount less than or equal to {} ORE.",
-            amount_to_ui_amount(balance_grains, ore_api::consts::TOKEN_DECIMALS)
-        );
-        prompt_to_continue();
-        return;
+    loop {
+        if claim_amount_grains > balance_grains {
+            println!(
+                "  You do not have enough rewards to claim {} ORE.",
+                amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
+            );
+            println!(
+                "  Please enter an amount less than or equal to {} ORE.",
+                amount_to_ui_amount(balance_grains, ore_api::consts::TOKEN_DECIMALS)
+            );
+
+            // Prompt for a valid claim amount again
+            match Text::new("\n  Enter the amount to claim:")
+                .prompt()
+            {
+                Ok(input) => {
+                    if input.trim().eq_ignore_ascii_case("esc") {
+                        println!("  Claim operation canceled.");
+                        return;
+                    }
+
+                    claim_amount = match input.trim().parse::<f64>() {
+                        Ok(val) if val >= 0.005 => val,
+                        _ => {
+                            println!("  Please enter a valid number above 0.005.");
+                            continue;
+                        }
+                    };
+                }
+                Err(InquireError::OperationCanceled) => {
+                    println!("  Claim operation canceled.");
+                    return;
+                }
+                Err(_) => {
+                    println!("  Invalid input. Please try again.");
+                    continue;
+                }
+            }
+
+            // Convert the claim amount to the smallest unit again
+            claim_amount_grains = (claim_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+        } else {
+            break;
+        }
     }
 
     // RED TEXT
@@ -211,12 +249,4 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
-
-    prompt_to_continue(); // Pause after the claim operation completes
-}
-
-fn prompt_to_continue() {
-    sleep(Duration::from_millis(100));
-    println!("\n  Press any key to continue...");
-    let _ = io::stdin().read(&mut [0u8]).unwrap();
 }

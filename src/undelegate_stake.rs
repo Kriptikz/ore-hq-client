@@ -1,9 +1,11 @@
 use std::{str::FromStr, time::Duration};
-
 use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 use spl_associated_token_account::get_associated_token_address;
+
+use crate::stake_balance::get_staked_balance;
+use crate::stake_balance;
 
 #[derive(Debug, Parser)]
 pub struct UnstakeArgs {
@@ -15,45 +17,46 @@ pub struct UnstakeArgs {
     pub amount: f64,
 }
 
-
 pub async fn undelegate_stake(args: UnstakeArgs, key: &Keypair, url: String, unsecure: bool) {
     let base_url = url;
-
     let client = reqwest::Client::new();
+    let url_prefix = if unsecure { "http".to_string() } else { "https".to_string() };
 
-    let url_prefix = if unsecure {
-        "http".to_string()
+    // Fetch the staked balance
+    let staked_balance = stake_balance::get_staked_balance(&key, base_url.clone(), unsecure).await;
+    println!("  Current Staked Balance: {:.11} ORE", staked_balance);
+
+    // Ensure unstake amount does not exceed staked balance
+    let unstake_amount = if args.amount > staked_balance {
+        println!("  Unstake amount exceeds staked balance. Defaulting to maximum available: {:.11} ORE", staked_balance);
+        staked_balance
     } else {
-        "https".to_string()
+        args.amount
     };
 
+    // Continue with transaction
     let resp = client.get(format!("{}://{}/pool/authority/pubkey", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
-
     let pool_pubkey = Pubkey::from_str(&resp).unwrap();
 
     let resp = client.get(format!("{}://{}/pool/fee_payer/pubkey", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
-
     let fee_pubkey = Pubkey::from_str(&resp).unwrap();
 
     let resp = client.get(format!("{}://{}/latest-blockhash", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
-
     let decoded_blockhash = BASE64_STANDARD.decode(resp).unwrap();
     let deserialized_blockhash = bincode::deserialize(&decoded_blockhash).unwrap();
 
     let ata_address = get_associated_token_address(&key.pubkey(), &ore_api::consts::MINT_ADDRESS);
 
-    let stake_amount = (args.amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
-    let ix = ore_miner_delegation::instruction::undelegate_stake(key.pubkey(), pool_pubkey, ata_address, stake_amount);
+    let unstake_amount_u64 = (unstake_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+    let ix = ore_miner_delegation::instruction::undelegate_stake(key.pubkey(), pool_pubkey, ata_address, unstake_amount_u64);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&fee_pubkey));
-
     tx.partial_sign(&[&key], deserialized_blockhash);
 
     let serialized_tx = bincode::serialize(&tx).unwrap();
-
     let encoded_tx = BASE64_STANDARD.encode(&serialized_tx);
 
-    let resp = client.post(format!("{}://{}/unstake?pubkey={}&amount={}", url_prefix, base_url, key.pubkey().to_string(), stake_amount)).body(encoded_tx).send().await;
+    let resp = client.post(format!("{}://{}/unstake?pubkey={}&amount={}", url_prefix, base_url, key.pubkey().to_string(), unstake_amount_u64)).body(encoded_tx).send().await;
     if let Ok(res) = resp {
         if let Ok(txt) = res.text().await {
             match txt.as_str() {
