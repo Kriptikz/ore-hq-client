@@ -1,5 +1,4 @@
 use std::{ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
-
 use clap::{arg, Parser};
 use drillx_2::equix;
 use futures_util::{SinkExt, StreamExt};
@@ -7,6 +6,9 @@ use solana_sdk::{signature::Keypair, signer::Signer};
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
 use base64::prelude::*;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::env;
 
 #[derive(Debug)]
 pub enum ServerMessage {
@@ -17,11 +19,11 @@ pub enum ServerMessage {
 pub struct MineArgs {
     #[arg(
         long,
-        value_name = "CORES",
-        default_value = "1",
-        help = "Number of cores to use while mining"
+        value_name = "threads",
+        default_value = "4",
+        help = "Number of threads to use while mining"
     )]
-    pub cores: u32,
+    pub threads: u32,
     #[arg(
         long,
         value_name = "BUFFER",
@@ -32,7 +34,13 @@ pub struct MineArgs {
 }
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
+    let running = Arc::new(AtomicBool::new(true));
+
     loop {
+        if !running.load(Ordering::SeqCst) {
+            break;
+        }
+
         let base_url = url.clone();
         let mut ws_url_str = if unsecure {
             format!("ws://{}", url)
@@ -79,8 +87,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
         ws_url_str.push_str(&format!("?timestamp={}", timestamp));
         let url = url::Url::parse(&ws_url_str).expect("Failed to parse server url");
         let host = url.host_str().expect("Invalid host in server url");
-        let threads = args.cores;
-
+        let threads = args.threads;
 
         let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
 
@@ -130,31 +137,56 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 // receive messages
                 let message_sender = sender.clone();
                 while let Some(msg) = message_receiver.recv().await {
+                    if !running.load(Ordering::SeqCst) {
+                        break;
+                    }
+                
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
-                            println!("Received start mining message!");
-                            println!("Mining starting...");
-                            println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
-                            println!("Challenge: {}", BASE64_STANDARD.encode(challenge));
-
+                            // Adjust the cutoff with the buffer
                             let mut cutoff = cutoff.saturating_sub(args.buffer as u64);
                             if cutoff > 60 {
                                 cutoff = 55;
                             }
-                            println!("Cutoff in : {}s", cutoff);
+                
+                            // Wait for 3 seconds before showing the progress bar
+                            tokio::time::sleep(Duration::from_secs(3)).await;
 
+                            // Detect if running on Windows and set symbols accordingly
+                            let pb = if env::consts::OS == "windows" {
+                                ProgressBar::new_spinner().with_style(
+                                    ProgressStyle::default_spinner()
+                                        .tick_strings(&["-", "\\", "|", "/"]) // Use simple ASCII symbols
+                                        .template("{spinner:.green} {msg}")
+                                        .expect("Failed to set progress bar template"),
+                                )
+                            } else {
+                                ProgressBar::new_spinner().with_style(
+                                    ProgressStyle::default_spinner()
+                                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                                        .template("{spinner:.red} {msg}")
+                                        .expect("Failed to set progress bar template"),
+                                )
+                            };
+
+                            println!();
+                            pb.set_message("Mining...");
+                            pb.enable_steady_tick(Duration::from_millis(120));
+
+                            // Original mining code
                             let hash_timer = Instant::now();
                             let core_ids = core_affinity::get_core_ids().unwrap();
                             let nonces_per_thread = 10_000;
                             let handles = core_ids
                                 .into_iter()
                                 .map(|i| {
+                                    let running = running.clone(); // Capture running in thread
                                     std::thread::spawn({
                                         let mut memory = equix::SolverMemory::new();
                                         move || {
                                             if (i.id as u32).ge(&threads) {
-                                                return None
-                                            } 
+                                                return None;
+                                            }
 
                                             let _ = core_affinity::set_for_current(i);
 
@@ -166,8 +198,13 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                             let mut total_hashes: u64 = 0;
 
                                             loop {
+                                                // Check if Ctrl+C was pressed
+                                                if !running.load(Ordering::SeqCst) {
+                                                    return None;
+                                                }
+
                                                 // Create hash
-                                                for hx in  drillx_2::get_hashes_with_memory(&mut memory, &challenge, &nonce.to_le_bytes()) {
+                                                for hx in drillx_2::get_hashes_with_memory(&mut memory, &challenge, &nonce.to_le_bytes()) {
                                                     total_hashes += 1;
                                                     let difficulty = hx.difficulty();
                                                     if difficulty.gt(&best_difficulty) {
@@ -188,13 +225,12 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                                             break;
                                                         }
                                                     }
-                                                } 
-
+                                                }
 
                                                 // Increment nonce
                                                 nonce += 1;
                                             }
-                                            
+
                                             // Return the best nonce
                                             Some((best_nonce, best_difficulty, best_hash, total_hashes))
                                         }
@@ -202,25 +238,27 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 })
                                 .collect::<Vec<_>>();
 
-                                // Join handles and return best nonce
-                                let mut best_nonce: u64 = 0;
-                                let mut best_difficulty = 0;
-                                let mut best_hash = drillx_2::Hash::default();
-                                let mut total_nonces_checked = 0;
-                                for h in handles {
-                                    if let Ok(Some((nonce, difficulty, hash, nonces_checked))) = h.join() {
-                                        total_nonces_checked += nonces_checked;
-                                        if difficulty > best_difficulty {
-                                            best_difficulty = difficulty;
-                                            best_nonce = nonce;
-                                            best_hash = hash;
-                                        }
+                            // Join handles and return best nonce
+                            let mut best_nonce: u64 = 0;
+                            let mut best_difficulty = 0;
+                            let mut best_hash = drillx_2::Hash::default();
+                            let mut total_nonces_checked = 0;
+                            for h in handles {
+                                if let Ok(Some((nonce, difficulty, hash, nonces_checked))) = h.join() {
+                                    total_nonces_checked += nonces_checked;
+                                    if difficulty > best_difficulty {
+                                        best_difficulty = difficulty;
+                                        best_nonce = nonce;
+                                        best_hash = hash;
                                     }
                                 }
+                            }
 
                             let hash_time = hash_timer.elapsed();
 
-                            println!("Found best diff: {}", best_difficulty);
+                            // Stop the spinner after mining is done
+                            pb.finish_and_clear();
+                            println!("✔ Mining complete!");
                             println!("Processed: {}", total_nonces_checked);
                             println!("Hash time: {:?}", hash_time);
                             let hash_time_secs = hash_time.as_secs();
@@ -228,11 +266,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 println!("Hashpower: {:?} H/s", total_nonces_checked.saturating_div(hash_time_secs));
                             }
 
-
-                            let message_type =  2u8; // 1 u8 - BestSolution Message
+                            // Send results to the server
+                            let message_type = 2u8; // 1 u8 - BestSolution Message
                             let best_hash_bin = best_hash.d; // 16 u8
                             let best_nonce_bin = best_nonce.to_le_bytes(); // 8 u8
-                            
+
                             let mut hash_nonce_message = [0; 24];
                             hash_nonce_message[0..16].copy_from_slice(&best_hash_bin);
                             hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
@@ -265,12 +303,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             bin_data.extend(sig);
                             {
                                 let mut message_sender = message_sender.lock().await;
-
                                 let _ = message_sender.send(Message::Binary(bin_data)).await;
                             }
                         }
                     }
-                }
+                }                    
 
                 let _ = receiver_thread.await;
             }, 
@@ -288,7 +325,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(3)).await;
-
             }
         }
     }
@@ -297,63 +333,61 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t)=>{
-            println!("\n>>> Server Message: \n{}\n",t);
+            println!("{}",t);
         },
         Message::Binary(b) => {
             let message_type = b[0];
             match message_type {
-                    0 => {
-                        if b.len() < 49 {
-                            println!("Invalid data for Message StartMining");
-                        } else {
-                            let mut hash_bytes = [0u8; 32];
-                            // extract 256 bytes (32 u8's) from data for hash
-                            let mut b_index = 1;
-                            for i in 0..32 {
-                                hash_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 32;
-
-                            // extract 64 bytes (8 u8's)
-                            let mut cutoff_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                cutoff_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 8;
-                            let cutoff = u64::from_le_bytes(cutoff_bytes);
-
-                            let mut nonce_start_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                nonce_start_bytes[i] = b[i + b_index];
-                            }
-                            b_index += 8;
-                            let nonce_start = u64::from_le_bytes(nonce_start_bytes);
-
-                            let mut nonce_end_bytes = [0u8; 8];
-                            for i in 0..8 {
-                                nonce_end_bytes[i] = b[i + b_index];
-                            }
-                            let nonce_end = u64::from_le_bytes(nonce_end_bytes);
-
-                            let msg = ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
-
-                            let _ = message_channel.send(msg);
+                0 => {
+                    if b.len() < 49 {
+                        println!("Invalid data for Message StartMining");
+                    } else {
+                        let mut hash_bytes = [0u8; 32];
+                        // extract 256 bytes (32 u8's) from data for hash
+                        let mut b_index = 1;
+                        for i in 0..32 {
+                            hash_bytes[i] = b[i + b_index];
                         }
+                        b_index += 32;
 
-                    },
-                    _ => {
-                        println!("Failed to parse server message type");
+                        // extract 64 bytes (8 u8's)
+                        let mut cutoff_bytes = [0u8; 8];
+                        for i in 0..8 {
+                            cutoff_bytes[i] = b[i + b_index];
+                        }
+                        b_index += 8;
+                        let cutoff = u64::from_le_bytes(cutoff_bytes);
+
+                        let mut nonce_start_bytes = [0u8; 8];
+                        for i in 0..8 {
+                            nonce_start_bytes[i] = b[i + b_index];
+                        }
+                        b_index += 8;
+                        let nonce_start = u64::from_le_bytes(nonce_start_bytes);
+
+                        let mut nonce_end_bytes = [0u8; 8];
+                        for i in 0..8 {
+                            nonce_end_bytes[i] = b[i + b_index];
+                        }
+                        let nonce_end = u64::from_le_bytes(nonce_end_bytes);
+
+                        let msg = ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
+
+                        let _ = message_channel.send(msg);
                     }
+                },
+                _ => {
+                    println!("Failed to parse server message type");
                 }
-
+            }
         },
-        Message::Ping(v) => {println!("Got Ping: {:?}", v);}, 
-        Message::Pong(v) => {println!("Got Pong: {:?}", v);}, 
+        Message::Ping(_) => {}, 
+        Message::Pong(_) => {}, 
         Message::Close(v) => {
             println!("Got Close: {:?}", v);
             return ControlFlow::Break(());
         }, 
-        _ => {println!("Got invalid message data");}
+        _ => {}
     }
 
     ControlFlow::Continue(())

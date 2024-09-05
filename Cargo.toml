@@ -1,6 +1,6 @@
 [package]
 name = "ore-hq-client"
-version = "1.6.1"
+version = "2.0.0"
 edition = "2021"
 description = "Ore mining pool client."
 license = "Apache-2.0"
@@ -19,7 +19,6 @@ futures-util = "0.3.30"
 reqwest = "^0.11.0"
 rpassword = "7.3.1"
 solana-sdk = "1.18.21"
-spl-associated-token-account = { version = "2.2", features = ["no-entrypoint"] }
 tokio = { version = "1.39.2", features = ["full"] }
 tokio-tungstenite = { version = "0.23.1", features = ["native-tls"] }
 url = "2.5.2"
@@ -28,6 +27,12 @@ rayon = "1.10"
 crossbeam = "0.8.0"
 rand = "0.8.4"
 rand_chacha = "0.3.0"
+inquire = "0.7.5"
+home = "0.5.9"
+dirs = "5.0.1"
+colored = "2.0"
+indicatif = "0.17"
+spl-associated-token-account = { version = "2.2", features = ["no-entrypoint"] }
 ore-miner-delegation = { version = "0.4.0", features = ["no-entrypoint"] }
 
 [profile.release]

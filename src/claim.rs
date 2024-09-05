@@ -1,123 +1,252 @@
+use inquire::{Text, InquireError};
 use std::time::Duration;
 use std::io::{self, Write};
-use spl_token::amount_to_ui_amount;
-
 use clap::Parser;
 use solana_sdk::{signature::Keypair, signer::Signer};
+use colored::*;
+use spl_token::amount_to_ui_amount;
+use std::thread::sleep;
+use std::io::Read;
 
 #[derive(Debug, Parser)]
 pub struct ClaimArgs {
     #[arg(
         long,
         value_name = "AMOUNT",
-        default_value = "0.00",
-        help = "Amount of ore to claim.(minimum of 0.005)"
+        help = "Amount of ore to claim. (Minimum of 0.005 ORE)"
     )]
-    pub amount: f64,
-}
-
-pub fn ask_confirm(question: &str) -> bool {
-    println!("{}", question);
-    loop {
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        let _ = std::io::stdin().read_line(&mut input);
-
-        match input.trim().chars().next() {
-            Some('y') | Some('Y') => return true,
-            Some('n') | Some('N') => return false,
-            _ => println!("Please type only Y or N to continue."),
-        }
-    }
+    pub amount: Option<f64>,
 }
 
 pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
-    let mut claim_amount = (args.amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
-
-    let base_url = url;
     let client = reqwest::Client::new();
-
     let url_prefix = if unsecure {
         "http".to_string()
     } else {
         "https".to_string()
     };
 
+    // Fetch and display balance and rewards
+    let balance_response = client
+        .get(format!(
+            "{}://{}/miner/balance?pubkey={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    let balance = balance_response.parse::<f64>().unwrap_or(0.0);
+
+    let rewards_response = client
+        .get(format!(
+            "{}://{}/miner/rewards?pubkey={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    let rewards = rewards_response.parse::<f64>().unwrap_or(0.0);
+
+    println!();
+    println!("  Unclaimed Rewards: {:.11} ORE", rewards);
+    println!("  Wallet Balance:    {:.11} ORE", balance);
+
+    // Check if rewards are below the minimum claim amount
+    if rewards < 0.005 {
+        println!("\n  You have not reached the required claim limit of 0.005 ORE.");
+        println!("  Keep mining to accumulate more rewards before you can withdraw.");
+        return;  // Exit the function
+    }
+
+    // Convert balance to grains
+    let balance_grains = (rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+
+    // If balance is zero, inform the user and return to keypair selection
+    if balance_grains == 0 {
+        println!("\n  There is no balance to claim.");
+        return;
+    }
+
+    let mut claim_amount = args.amount.unwrap_or(0.0);
+
+    // Prompt the user for an amount if it's not provided or less than 0.005
     loop {
-        let balance = client.get(format!("{}://{}/miner/rewards?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).send().await.unwrap().text().await.unwrap();
-        let balance_grains = (balance.parse::<f64>().unwrap() * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
-        println!("Claimable Rewards: {} ORE", balance);
+        if claim_amount < 0.005 {
+            if claim_amount != 0.0 { // Only show the message if they previously entered an invalid value
+                println!("  Please enter a number above 0.005.");
+            }
 
-        if claim_amount == 0 {
-            claim_amount = balance_grains;
-        }
-
-        if claim_amount > balance_grains {
-            println!("You do not have enough rewards to claim {} ORE.", amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS));
-            println!("Please enter an amount less than or equal to {} ORE.", amount_to_ui_amount(balance_grains, ore_api::consts::TOKEN_DECIMALS));
-            claim_amount = loop {
-                let mut input = String::new();
-                io::stdout().flush().unwrap();
-                let _ = std::io::stdin().read_line(&mut input);
-                if let Ok(new_amount) = input.trim().parse::<f64>() {
-                    let new_claim_amount = (new_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
-                    if new_claim_amount <= balance_grains {
-                        break new_claim_amount;
+            match Text::new("\n  Enter the amount to claim (minimum 0.005 ORE or 'esc' to cancel):")
+                .prompt()
+            {
+                Ok(input) => {
+                    if input.trim().eq_ignore_ascii_case("esc") {
+                        println!("  Claim operation canceled.");
+                        return;
                     }
-                }
-                println!("Invalid input. Please enter a valid amount.");
-            };
-        }
 
-        // Confirm user wants to claim
-        if !ask_confirm(
-            format!(
-                "\nYou are about to claim {}.\nAre you sure you want to continue? [Y/n]",
-                format!(
-                    "{} ORE",
-                    amount_to_ui_amount(claim_amount, ore_api::consts::TOKEN_DECIMALS)
-                )
-            )
-            .as_str(),
-        ) {
+                    claim_amount = match input.trim().parse::<f64>() {
+                        Ok(val) if val >= 0.005 => val,
+                        _ => {
+                            println!("  Please enter a valid number above 0.005.");
+                            continue;
+                        }
+                    };
+                }
+                Err(InquireError::OperationCanceled) => {
+                    println!("  Claim operation canceled.");
+                    return;
+                }
+                Err(_) => {
+                    println!("  Invalid input. Please try again.");
+                    continue;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    // Convert the claim amount to the smallest unit
+    let mut claim_amount_grains = (claim_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+
+    // Handle the case where the claim amount is zero
+    if claim_amount_grains == 0 {
+        println!("  You entered 0 rewards to claim, so no claim will be made.");
+        return;
+    }
+
+    // Ensure the claim amount does not exceed the available balance
+    loop {
+        if claim_amount_grains > balance_grains {
+            println!(
+                "  You do not have enough rewards to claim {} ORE.",
+                amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
+            );
+            println!(
+                "  Please enter an amount less than or equal to {} ORE.",
+                amount_to_ui_amount(balance_grains, ore_api::consts::TOKEN_DECIMALS)
+            );
+
+            // Prompt for a valid claim amount again
+            match Text::new("\n  Enter the amount to claim:")
+                .prompt()
+            {
+                Ok(input) => {
+                    if input.trim().eq_ignore_ascii_case("esc") {
+                        println!("  Claim operation canceled.");
+                        return;
+                    }
+
+                    claim_amount = match input.trim().parse::<f64>() {
+                        Ok(val) if val >= 0.005 => val,
+                        _ => {
+                            println!("  Please enter a valid number above 0.005.");
+                            continue;
+                        }
+                    };
+                }
+                Err(InquireError::OperationCanceled) => {
+                    println!("  Claim operation canceled.");
+                    return;
+                }
+                Err(_) => {
+                    println!("  Invalid input. Please try again.");
+                    continue;
+                }
+            }
+
+            // Convert the claim amount to the smallest unit again
+            claim_amount_grains = (claim_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+        } else {
+            break;
+        }
+    }
+
+    // RED TEXT
+    match Text::new(
+        &format!(
+            "  Are you sure you want to claim {} ORE? (Y/n or 'esc' to cancel)",
+            amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
+        )
+        .red()
+        .to_string(),
+    )
+    .prompt()
+    {
+        Ok(confirm) => {
+            if confirm.trim().eq_ignore_ascii_case("esc") {
+                println!("  Claim canceled.");
+                return;
+            } else if confirm.trim().to_lowercase() != "y" {
+                println!("  Claim canceled.");
+                return;
+            }
+        }
+        Err(InquireError::OperationCanceled) => {
+            println!("  Claim operation canceled.");
             return;
         }
+        Err(_) => {
+            println!("  Invalid input. Claim canceled.");
+            return;
+        }
+    }
 
-        println!("Sending claim request for amount {}...", claim_amount);
-        let resp = client.post(format!("{}://{}/claim?pubkey={}&amount={}", url_prefix, base_url, key.pubkey().to_string(), claim_amount)).send().await;
+    println!(
+        "  Sending claim request for {} ORE...",
+        amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
+    );
 
-        match resp {
-            Ok(res) => {
-                match res.text().await.unwrap().as_str() {
-                    "SUCCESS" => {
-                        println!("Successfully queued claim request. Please wait while it is processed.");
-                        break;
-                    },
-                    "QUEUED" => {
-                        println!("Claim is already queued for processing.");
-                        break;
-                    },
-                    "claim minimum is 0.005" => {
-                        println!("Minimum claim amount is 0.005.");
-                        break;
-                    }
-                    other => {
-                        let time = other.parse::<u64>().unwrap();
-                        let time_left = 1800 - time;
-                        let secs = time_left % 60;
-                        let mins = (time_left / 60) % 60;
-                        println!("Time left until next claim available: {}m {}s", mins, secs);
-                        break;
-                    }
-                }
+    let resp = client
+        .post(format!(
+            "{}://{}/claim?pubkey={}&amount={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string(),
+            claim_amount_grains
+        ))
+        .send()
+        .await;
 
-            },
-            Err(e) => {
-                println!("ERROR: {}", e);
-                println!("Retrying in 5 seconds...");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+    match resp {
+        Ok(res) => match res.text().await.unwrap().as_str() {
+            "SUCCESS" => {
+                println!("  Successfully claimed rewards!");
             }
+            "QUEUED" => {
+                println!("  Claim is already queued for processing.");
+            }
+            other => {
+                if let Ok(time) = other.parse::<u64>() {
+                    let time_left = 1800 - time;
+                    let secs = time_left % 60;
+                    let mins = (time_left / 60) % 60;
+                    println!(
+                        "  You cannot claim until the time is up. Time left until next claim available: {}m {}s",
+                        mins, secs
+                    );
+                } else {
+                    println!("  Unexpected response: {}", other);
+                }
+            }
+        },
+        Err(e) => {
+            println!("  ERROR: {}", e);
+            println!("  Retrying in 5 seconds...");
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
 }
