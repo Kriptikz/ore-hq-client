@@ -1,7 +1,4 @@
 use std::str::FromStr;
-use std::io::Read;
-use std::time::Duration;
-use std::thread::sleep;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction, transaction::Transaction};
@@ -42,19 +39,19 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
 
             match txt.as_str() {
                 "SUCCESS" => {
-                    println!("\n  Successfully signed up!");
+                    println!("  Successfully signed up!");
                 },
                 "EXISTS" => {
-                    println!("\n  You're already signed up!");
+                    println!("  You're already signed up!");
                 }
                 _ => {
-                    println!("\n  Transaction failed, please try again.\nDo you have enough SOL in the account?");
+                    println!("  Transaction failed, please try again.\nDo you have enough SOL in the account?");
                 }
             }
         } else {
-            println!("\n  Transaction failed, please wait and try again.");
+            println!("  Transaction failed, please wait and try again.");
         }
     } else {
-        println!("\n  Transaction failed, please wait and try again.");
+        println!("  Transaction failed, please wait and try again.");
     }
 }

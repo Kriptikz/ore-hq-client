@@ -1,10 +1,11 @@
-use std::{str::FromStr, time::Duration};
+use std::{str::FromStr};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
+use colored::*;
+use inquire::{Text, InquireError};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 use spl_associated_token_account::get_associated_token_address;
 
-use crate::stake_balance::get_staked_balance;
 use crate::stake_balance;
 
 #[derive(Debug, Parser)]
@@ -33,6 +34,39 @@ pub async fn undelegate_stake(args: UnstakeArgs, key: &Keypair, url: String, uns
     } else {
         args.amount
     };
+
+// Add confirmation step with red text before unstaking
+match Text::new(
+    &format!(
+        "  Are you sure you want to unstake {} ORE? (Y/n or 'esc' to cancel)",
+        unstake_amount
+    )
+    .red()
+    .to_string(),
+)
+.prompt()
+{
+    Ok(confirm) => {
+        if confirm.trim().eq_ignore_ascii_case("esc") {
+            println!("  Unstaking canceled.");
+            return;
+        } else if confirm.trim().is_empty() || confirm.trim().to_lowercase() == "y" {
+            // Proceed with unstaking
+        } else {
+            println!("  Unstaking canceled.");
+            return;
+        }
+    }
+    Err(InquireError::OperationCanceled) => {
+        println!("  Unstaking operation canceled.");
+        return;
+    }
+    Err(_) => {
+        println!("  Invalid input. Unstaking canceled.");
+        return;
+    }
+}
+
 
     // Continue with transaction
     let resp = client.get(format!("{}://{}/pool/authority/pubkey", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();

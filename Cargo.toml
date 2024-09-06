@@ -1,6 +1,6 @@
 [package]
 name = "ore-hq-client"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 description = "Ore mining pool client."
 license = "Apache-2.0"
@@ -34,6 +34,7 @@ colored = "2.0"
 indicatif = "0.17"
 spl-associated-token-account = { version = "2.2", features = ["no-entrypoint"] }
 ore-miner-delegation = { version = "0.4.0", features = ["no-entrypoint"] }
+
 
 [profile.release]
 opt-level = 3     # Full optimisations

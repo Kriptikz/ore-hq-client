@@ -148,9 +148,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             if cutoff > 60 {
                                 cutoff = 55;
                             }
-                
-                            // Wait for 3 seconds before showing the progress bar
-                            tokio::time::sleep(Duration::from_secs(3)).await;
 
                             // Detect if running on Windows and set symbols accordingly
                             let pb = if env::consts::OS == "windows" {
