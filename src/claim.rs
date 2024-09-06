@@ -60,8 +60,7 @@ println!("  Wallet Balance:    {:.11} ORE", balance);
 
 // Check if the wallet balance is zero and display the note
 if balance == 0.0 {
-    println!("\n  Note: A 0.004 ORE fee will be deducted from your claim amount to cover\n
-    the cost of Token Account Creation. This is a one time fee used to create the ORE Token Account.");
+    println!("\n  Note: A 0.004 ORE fee will be deducted from your claim amount to cover the cost\n  of Token Account Creation. This is a one time fee used to create the ORE Token Account.");
 }
 
 if rewards < 0.005 {
