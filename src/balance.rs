@@ -1,7 +1,4 @@
 use solana_sdk::{signature::Keypair, signer::Signer};
-use std::io::Read;
-use std::time::Duration;
-use std::thread::sleep;
 
 pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     let base_url = url;
@@ -13,6 +10,7 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
         "https".to_string()
     };
 
+    // Fetch Wallet (Stakable) Balance
     let balance_response = client
         .get(format!(
             "{}://{}/miner/balance?pubkey={}",
@@ -32,6 +30,7 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
         Err(_) => 0.0,
     };
 
+    // Fetch Unclaimed Rewards
     let rewards_response = client
         .get(format!(
             "{}://{}/miner/rewards?pubkey={}",
@@ -51,15 +50,30 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
         Err(_) => 0.0,
     };
 
-    println!();
+    // Fetch Staked Balance
+    let stake_response = client
+        .get(format!(
+            "{}://{}/miner/stake?pubkey={}",
+            url_prefix,
+            base_url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    let staked_balance = if stake_response.contains("Failed to g") {
+        println!("  Delegated stake balance: No staked account");
+        0.0
+    } else {
+        stake_response.parse::<f64>().unwrap_or(0.0)
+    };
     println!("  Unclaimed Rewards: {:.11} ORE", rewards);
     println!("  Wallet (Stakable): {:.11} ORE", balance);
-}
-
-fn prompt_to_continue() {
-    sleep(Duration::from_millis(100));
-    println!("\n  Press any key to continue...");
-    let _ = std::io::stdin().read(&mut [0u8]).unwrap();
+    println!("  Staked Balance:    {:.11} ORE", staked_balance);
 }
 
 pub async fn get_balance(key: &Keypair, url: String, unsecure: bool) -> f64 {

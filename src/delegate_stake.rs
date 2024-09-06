@@ -1,6 +1,8 @@
 use std::{str::FromStr, time::Duration};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
+use colored::*;
+use inquire::{Text, InquireError};
 use reqwest::StatusCode;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 
@@ -28,18 +30,50 @@ pub async fn delegate_stake(args: StakeArgs, key: Keypair, url: String, unsecure
     let base_url = url;
     let client = reqwest::Client::new();
     let url_prefix = if unsecure { "http".to_string() } else { "https".to_string() };
-
-    // Fetch the balance
     let balance = get_balance(&key, base_url.clone(), unsecure).await;
-    println!("  Current Wallet Balance: {:.11} ORE", balance);
 
     // Ensure stake amount does not exceed balance
     let stake_amount = if args.amount > balance {
-        println!("  Stake amount exceeds wallet balance. Defaulting to maximum available: {:.11} ORE", balance);
+        println!(
+            "  You do not have enough to stake {} ORE.\n  Adjusting stake amount to the maximum available: {} ORE",
+            args.amount, balance
+        );
         balance
     } else {
         args.amount
     };
+
+    // RED TEXT
+    match Text::new(
+        &format!(
+            "  Are you sure you want to stake {} ORE? (Y/n or 'esc' to cancel)",
+            stake_amount
+        )
+        .red()
+        .to_string(),
+    )
+    .prompt()
+    {
+        Ok(confirm) => {
+            if confirm.trim().eq_ignore_ascii_case("esc") {
+                println!("  Staking canceled.");
+                return;
+            } else if confirm.trim().is_empty() || confirm.trim().to_lowercase() == "y" {
+                // Proceed with staking
+            } else {
+                println!("  Staking canceled.");
+                return;
+            }
+        }
+        Err(InquireError::OperationCanceled) => {
+            println!("  Staking operation canceled.");
+            return;
+        }
+        Err(_) => {
+            println!("  Invalid input. Staking canceled.");
+            return;
+        }
+    }
 
     if !args.auto {
         // Non-auto staking logic

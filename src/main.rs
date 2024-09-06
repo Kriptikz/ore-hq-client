@@ -80,8 +80,6 @@ enum StakeCommands {
     Stake(delegate_stake::StakeArgs),
     #[command(about = "Undelegate stake from the pool miner.")]
     Unstake(undelegate_stake::UnstakeArgs),
-    #[command(about = "Delegated stake balance.")]
-    StakeBalance,
 }
 
 #[tokio::main]
@@ -469,28 +467,18 @@ fn load_keypair(keypair_path: &str) -> Option<solana_sdk::signature::Keypair> {
     }
 }
 
-
-fn has_valid_decimal_places(amount_str: &str, max_decimals: usize) -> bool {
-    if let Some(dot_index) = amount_str.find('.') {
-        let decimal_places = amount_str.len() - dot_index - 1;
-        return decimal_places <= max_decimals;
-    }
-    true
-}
-
 async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let version = env!("CARGO_PKG_VERSION");
 
     let options = vec![
         "  Mine",   
-        "  ProtoMine",
+        // "  ProtoMine (Experimental)",
         "  Sign up",
         "  Claim Rewards",
         "  View Balances",
         "  Stake",
         "  Unstake",
-        "  Stake Balance",
         "  Exit",
     ];
 
@@ -502,6 +490,7 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
             &format!("Welcome to Ec1ipse Ore HQ Client v{}, what would you like to do?", version), 
             options
         )
+        .with_page_size(9)  // Set page size to 9 for the main menu
         .prompt() {
             Ok(s) => Some(s),
             Err(inquire::error::InquireError::OperationCanceled) => {
@@ -510,7 +499,7 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
             },
             Err(_) => {
                 println!("  Failed to prompt for selection.");
-                return Err("Failed to prompt for selection.".into());
+                return Err("  Failed to prompt for selection.".into());
             }
         },
     };
@@ -553,6 +542,7 @@ async fn run_command(
     base_url: String,
     unsecure_conn: bool,
     selection: Option<&str>,
+    
 ) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         Some(Commands::Mine(args)) => {
@@ -631,69 +621,49 @@ async fn run_command(
                         balance(&key, base_url, unsecure_conn).await;
                     },
                     "  Stake" => {
-                        balance(&key, base_url.clone(), unsecure_conn).await;
+    balance(&key, base_url.clone(), unsecure_conn).await;
 
-                        let stake_mode = match Select::new("  Choose your staking mode:", vec!["  Auto", "  Manual"])
-                        .prompt() {
-                        Ok(s) => s,
-                        Err(inquire::error::InquireError::OperationCanceled) => {
-                            println!("  Operation canceled, exiting program.");
-                            std::process::exit(0);
-                        },
-                        Err(_) => {
-                            println!("  Failed to prompt for staking mode.");
-                            return Err("Failed to prompt for staking mode.".into());
-                        }
-                    };
+    loop {
+        let stake_input = Text::new("  Enter the amount of ore to stake (or 'esc' to cancel):")
+            .prompt();
 
-                        loop {
-                            let stake_input = Text::new("  Enter the amount of ore to stake (or 'esc' to cancel):")
-                                .prompt();
+        match stake_input {
+            Ok(input) => {
+                let input = input.trim();
+                if input.eq_ignore_ascii_case("esc") {
+                    println!("  Staking operation canceled.");
+                    break;
+                }
 
-                            match stake_input {
-                                Ok(input) => {
-                                    let input = input.trim();
-                                    if input.eq_ignore_ascii_case("esc") {
-                                        println!("  Staking operation canceled.");
-                                        break;
-                                    }
+                match input.parse::<f64>() {
+                    Ok(stake_amount) if stake_amount > 0.0 => {
+                        let args = delegate_stake::StakeArgs {
+                            amount: stake_amount,
+                            auto: true, // Auto-staking by default
+                        };
+                        delegate_stake::delegate_stake(args, key, base_url.clone(), unsecure_conn).await;
+                        break;
+                    }
+                    Ok(_) => {
+                        println!("  Please enter a valid number greater than 0.");
+                    }
+                    Err(_) => {
+                        println!("  Please enter a valid number.");
+                    }
+                }
+            },
+            Err(inquire::error::InquireError::OperationCanceled) => {
+                println!("  Staking operation canceled.");
+                break;
+            },
+            Err(_) => {
+                println!("  Invalid input. Please try again.");
+            }
+        }
+    }
+},
 
-                                    match input.parse::<f64>() {
-                                        Ok(stake_amount) if stake_amount > 0.0 => {
-                                            let auto_stake = match stake_mode {
-                                                "  Auto" => true,
-                                                _ => false,
-                                            };
-
-                                            let args = delegate_stake::StakeArgs {
-                                                amount: stake_amount,
-                                                auto: auto_stake,
-                                            };
-                                            delegate_stake::delegate_stake(args, key, base_url.clone(), unsecure_conn).await;
-                                            break;
-                                        }
-                                        Ok(_) => {
-                                            println!("  Please enter a valid number greater than 0.");
-                                        }
-                                        Err(_) => {
-                                            println!("  Please enter a valid number.");
-                                        }
-                                    }
-                                },
-                                Err(inquire::error::InquireError::OperationCanceled) => {
-                                    println!("  Staking operation canceled.");
-                                    break;
-                                },
-                                Err(_) => {
-                                    println!("  Invalid input. Please try again.");
-                                }
-                            }
-                        }
-                    },
                     "  Unstake" => {
-                        // Fetch and display current staked balance before asking for unstake amount
-                        println!("  Fetching current staked balance...");
-                        println!();
                         stake_balance::stake_balance(&key, base_url.clone(), unsecure_conn).await;
 
                         loop {
@@ -733,9 +703,6 @@ async fn run_command(
                                 }
                             }
                         }
-                    },
-                    "  Stake Balance" => {
-                        stake_balance::stake_balance(&key, base_url, unsecure_conn).await;
                     },
                     _ => println!("  Unknown selection."),
                 }
