@@ -10,9 +10,16 @@ pub async fn stake_balance(key: &Keypair, url: String, unsecure: bool) {
         "https".to_string()
     };
 
-    match client.get(format!("{}://{}/miner/stake?pubkey={}", url_prefix, base_url, key.pubkey().to_string()))
-        .send().await
-        {
+    match client
+        .get(format!(
+            "{}://{}/miner/stake?pubkey={}",
+            url_prefix,
+            base_url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
+    {
         Ok(response) => {
             let balance = response.text().await.unwrap();
             // Check if the balance failed to load
@@ -21,7 +28,7 @@ pub async fn stake_balance(key: &Keypair, url: String, unsecure: bool) {
             } else {
                 println!("  Staked Balance: {:.11} ORE", balance);
             }
-        },
+        }
         Err(e) => {
             println!("  Error fetching stake balance: {:?}", e);
         }
@@ -33,8 +40,15 @@ pub async fn get_staked_balance(key: &Keypair, url: String, unsecure: bool) -> f
     let client = reqwest::Client::new();
     let url_prefix = if unsecure { "http" } else { "https" };
 
-    match client.get(format!("{}://{}/miner/stake?pubkey={}", url_prefix, base_url, key.pubkey().to_string()))
-        .send().await
+    match client
+        .get(format!(
+            "{}://{}/miner/stake?pubkey={}",
+            url_prefix,
+            base_url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
     {
         Ok(response) => {
             let balance_str = response.text().await.unwrap();
@@ -44,7 +58,7 @@ pub async fn get_staked_balance(key: &Keypair, url: String, unsecure: bool) -> f
             } else {
                 balance_str.parse::<f64>().unwrap_or(0.0)
             }
-        },
+        }
         Err(e) => {
             println!();
             println!("  Error fetching stake balance: {:?}", e);

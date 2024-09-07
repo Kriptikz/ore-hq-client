@@ -83,7 +83,9 @@ pub async fn get_balance(key: &Keypair, url: String, unsecure: bool) -> f64 {
     let balance_response = client
         .get(format!(
             "{}://{}/miner/balance?pubkey={}",
-            url_prefix, url, key.pubkey().to_string()
+            url_prefix,
+            url,
+            key.pubkey().to_string()
         ))
         .send()
         .await

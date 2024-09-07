@@ -1,18 +1,28 @@
-use std::{ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use base64::prelude::*;
 use clap::{arg, Parser};
 use drillx_2::equix;
 use futures_util::{SinkExt, StreamExt};
-use solana_sdk::{signature::Keypair, signer::Signer};
-use tokio::sync::{mpsc::UnboundedSender, Mutex};
-use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
-use base64::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::sync::atomic::{AtomicBool, Ordering};
+use solana_sdk::{signature::Keypair, signer::Signer};
 use std::env;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    ops::{ControlFlow, Range},
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use tokio::sync::{mpsc::UnboundedSender, Mutex};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        handshake::client::{generate_key, Request},
+        Message,
+    },
+};
 
 #[derive(Debug)]
 pub enum ServerMessage {
-    StartMining([u8; 32], Range<u64>, u64)
+    StartMining([u8; 32], Range<u64>, u64),
 }
 
 #[derive(Debug, Parser)]
@@ -60,7 +70,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             "https".to_string()
         };
 
-        let timestamp = if let Ok(response) = client.get(format!("{}://{}/timestamp", http_prefix, base_url)).send().await {
+        let timestamp = if let Ok(response) = client
+            .get(format!("{}://{}/timestamp", http_prefix, base_url))
+            .send()
+            .await
+        {
             if let Ok(ts) = response.text().await {
                 if let Ok(ts) = ts.parse::<u64>() {
                     ts
@@ -109,7 +123,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 println!("Connected to network!");
 
                 let (mut sender, mut receiver) = ws_stream.split();
-                let (message_sender, mut message_receiver) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
+                let (message_sender, mut message_receiver) =
+                    tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
 
                 let receiver_thread = tokio::spawn(async move {
                     while let Some(Ok(message)) = receiver.next().await {
@@ -120,7 +135,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 });
 
                 // send Ready message
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_secs();
 
                 let msg = now.to_le_bytes();
                 let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
@@ -140,7 +158,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                     if !running.load(Ordering::SeqCst) {
                         break;
                     }
-                
+
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
                             // Adjust the cutoff with the buffer
@@ -160,7 +178,9 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             } else {
                                 ProgressBar::new_spinner().with_style(
                                     ProgressStyle::default_spinner()
-                                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                                        .tick_strings(&[
+                                            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+                                        ])
                                         .template("{spinner:.red} {msg}")
                                         .expect("Failed to set progress bar template"),
                                 )
@@ -187,7 +207,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                                             let _ = core_affinity::set_for_current(i);
 
-                                            let first_nonce = nonce_range.start + (nonces_per_thread * (i.id as u64));
+                                            let first_nonce = nonce_range.start
+                                                + (nonces_per_thread * (i.id as u64));
                                             let mut nonce = first_nonce;
                                             let mut best_nonce = nonce;
                                             let mut best_difficulty = 0;
@@ -201,7 +222,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                                 }
 
                                                 // Create hash
-                                                for hx in drillx_2::get_hashes_with_memory(&mut memory, &challenge, &nonce.to_le_bytes()) {
+                                                for hx in drillx_2::get_hashes_with_memory(
+                                                    &mut memory,
+                                                    &challenge,
+                                                    &nonce.to_le_bytes(),
+                                                ) {
                                                     total_hashes += 1;
                                                     let difficulty = hx.difficulty();
                                                     if difficulty.gt(&best_difficulty) {
@@ -229,7 +254,12 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                             }
 
                                             // Return the best nonce
-                                            Some((best_nonce, best_difficulty, best_hash, total_hashes))
+                                            Some((
+                                                best_nonce,
+                                                best_difficulty,
+                                                best_hash,
+                                                total_hashes,
+                                            ))
                                         }
                                     })
                                 })
@@ -241,7 +271,9 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             let mut best_hash = drillx_2::Hash::default();
                             let mut total_nonces_checked = 0;
                             for h in handles {
-                                if let Ok(Some((nonce, difficulty, hash, nonces_checked))) = h.join() {
+                                if let Ok(Some((nonce, difficulty, hash, nonces_checked))) =
+                                    h.join()
+                                {
                                     total_nonces_checked += nonces_checked;
                                     if difficulty > best_difficulty {
                                         best_difficulty = difficulty;
@@ -260,7 +292,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             println!("Hash time: {:?}", hash_time);
                             let hash_time_secs = hash_time.as_secs();
                             if hash_time_secs > 0 {
-                                println!("Hashpower: {:?} H/s", total_nonces_checked.saturating_div(hash_time_secs));
+                                println!(
+                                    "Hashpower: {:?} H/s",
+                                    total_nonces_checked.saturating_div(hash_time_secs)
+                                );
                             }
 
                             // Send results to the server
@@ -271,7 +306,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             let mut hash_nonce_message = [0; 24];
                             hash_nonce_message[0..16].copy_from_slice(&best_hash_bin);
                             hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
-                            let signature = key.sign_message(&hash_nonce_message).to_string().as_bytes().to_vec();
+                            let signature = key
+                                .sign_message(&hash_nonce_message)
+                                .to_string()
+                                .as_bytes()
+                                .to_vec();
 
                             let mut bin_data = [0; 57];
                             bin_data[00..1].copy_from_slice(&message_type.to_le_bytes());
@@ -289,7 +328,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                             tokio::time::sleep(Duration::from_secs(5 + args.buffer as u64)).await;
 
-                            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs();
 
                             let msg = now.to_le_bytes();
                             let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
@@ -304,10 +346,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             }
                         }
                     }
-                }                    
+                }
 
                 let _ = receiver_thread.await;
-            }, 
+            }
             Err(e) => {
                 match e {
                     tokio_tungstenite::tungstenite::Error::Http(e) => {
@@ -316,7 +358,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                         } else {
                             println!("Http Error: {:?}", e);
                         }
-                    }, 
+                    }
                     _ => {
                         println!("Error: {:?}", e);
                     }
@@ -327,11 +369,14 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
     }
 }
 
-fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>) -> ControlFlow<(), ()> {
+fn process_message(
+    msg: Message,
+    message_channel: UnboundedSender<ServerMessage>,
+) -> ControlFlow<(), ()> {
     match msg {
-        Message::Text(t)=>{
-            println!("{}",t);
-        },
+        Message::Text(t) => {
+            println!("{}", t);
+        }
         Message::Binary(b) => {
             let message_type = b[0];
             match message_type {
@@ -368,22 +413,23 @@ fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>
                         }
                         let nonce_end = u64::from_le_bytes(nonce_end_bytes);
 
-                        let msg = ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
+                        let msg =
+                            ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
 
                         let _ = message_channel.send(msg);
                     }
-                },
+                }
                 _ => {
                     println!("Failed to parse server message type");
                 }
             }
-        },
-        Message::Ping(_) => {}, 
-        Message::Pong(_) => {}, 
+        }
+        Message::Ping(_) => {}
+        Message::Pong(_) => {}
         Message::Close(v) => {
             println!("Got Close: {:?}", v);
             return ControlFlow::Break(());
-        }, 
+        }
         _ => {}
     }
 

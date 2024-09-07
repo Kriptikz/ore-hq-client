@@ -1,22 +1,22 @@
-use clap::{Parser, Subcommand};
-use inquire::{Text, Confirm, Select};
-use dirs::home_dir;
-use std::path::PathBuf;
-use std::io::{self, Write, BufRead};
-use solana_sdk::signature::read_keypair_file;
-use signup::signup;
-use claim::ClaimArgs;
-use mine::{MineArgs, mine};
-use protomine::{MineArgs as ProtoMineArgs, protomine};
 use balance::balance;
+use claim::ClaimArgs;
+use clap::{Parser, Subcommand};
+use dirs::home_dir;
+use inquire::{Confirm, Select, Text};
+use mine::{mine, MineArgs};
+use protomine::{protomine, MineArgs as ProtoMineArgs};
+use signup::signup;
+use solana_sdk::signature::read_keypair_file;
 use std::fs;
+use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 
-mod signup;
-mod protomine;
-mod mine;
-mod claim;
 mod balance;
+mod claim;
 mod delegate_stake;
+mod mine;
+mod protomine;
+mod signup;
 mod stake_balance;
 mod undelegate_stake;
 
@@ -30,7 +30,7 @@ struct Args {
         long,
         value_name = "SERVER_URL",
         help = "URL of the server to connect to",
-        default_value = "ec1ipse.me",
+        default_value = "ec1ipse.me"
     )]
     url: String,
 
@@ -38,7 +38,7 @@ struct Args {
         long,
         value_name = "KEYPAIR_PATH",
         help = "Filepath to keypair to use",
-        default_value = "~/.config/solana/id.json",
+        default_value = "~/.config/solana/id.json"
     )]
     keypair: String,
 
@@ -46,12 +46,12 @@ struct Args {
         long,
         short,
         action,
-        help = "Use unsecure http connection instead of https.",
+        help = "Use unsecure http connection instead of https."
     )]
     use_http: bool,
 
     #[command(subcommand)]
-    command: Option<Commands>
+    command: Option<Commands>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -103,8 +103,10 @@ async fn main() {
 
     if keypair_exists {
         // Keypair path is provided and exists, proceed directly
-        let key = read_keypair_file(&keypair_path)
-            .expect(&format!("Failed to load keypair from file: {}", keypair_path));
+        let key = read_keypair_file(&keypair_path).expect(&format!(
+            "Failed to load keypair from file: {}",
+            keypair_path
+        ));
 
         if let Some(command) = args.command {
             // A valid command is provided, execute it directly
@@ -146,7 +148,7 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
             if let Ok(path) = line {
                 let expanded_path = expand_tilde(&path);
                 let path_buf = PathBuf::from(&expanded_path);
-                
+
                 if path_buf.exists() && !seen_paths.contains(&expanded_path) {
                     seen_paths.insert(expanded_path.clone());
 
@@ -158,7 +160,8 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
                             if file_path.is_file() {
                                 let file_path_str = file_path.to_string_lossy().to_string();
                                 if !seen_paths.contains(&file_path_str) {
-                                    valid_keypair_paths.push(replace_home_with_tilde(&file_path_str));
+                                    valid_keypair_paths
+                                        .push(replace_home_with_tilde(&file_path_str));
                                     seen_paths.insert(file_path_str);
                                 }
                             }
@@ -173,16 +176,20 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
         if !valid_keypair_paths.is_empty() {
             keypair_paths = valid_keypair_paths.clone();
             // Update config file with only valid paths
-            let mut file = fs::File::create(&config_path).expect("Failed to open configuration file for writing.");
+            let mut file = fs::File::create(&config_path)
+                .expect("Failed to open configuration file for writing.");
             for path in valid_keypair_paths {
-                writeln!(file, "{}", expand_tilde(&path)).expect("Failed to write keypair path to configuration file.");
+                writeln!(file, "{}", expand_tilde(&path))
+                    .expect("Failed to write keypair path to configuration file.");
             }
         }
     }
 
     // Hardcode check for the default Solana keypair
     let solana_default_keypair = expand_tilde("~/.config/solana/id.json");
-    if PathBuf::from(&solana_default_keypair).exists() && !seen_paths.contains(&solana_default_keypair) {
+    if PathBuf::from(&solana_default_keypair).exists()
+        && !seen_paths.contains(&solana_default_keypair)
+    {
         keypair_paths.push(replace_home_with_tilde(&solana_default_keypair));
         seen_paths.insert(solana_default_keypair);
     }
@@ -195,12 +202,17 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
     keypair_paths.push("  Remove".to_string());
 
     loop {
-        let selection = match Select::new("  Select a keypair to use or manage:", keypair_paths.clone()).prompt() {
+        let selection = match Select::new(
+            "  Select a keypair to use or manage:",
+            keypair_paths.clone(),
+        )
+        .prompt()
+        {
             Ok(s) => s,
             Err(inquire::error::InquireError::OperationCanceled) => {
                 println!("  Operation canceled, exiting program.");
                 std::process::exit(0);
-            },
+            }
             Err(_) => {
                 println!("  Failed to prompt for keypair selection.");
                 return None;
@@ -223,7 +235,9 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
                         continue;
                     }
                 } else {
-                    println!("  The specified keypair path does not exist. Please enter a valid path.");
+                    println!(
+                        "  The specified keypair path does not exist. Please enter a valid path."
+                    );
                     return ask_for_custom_keypair();
                 }
             }
@@ -255,17 +269,18 @@ fn remove_keypair() {
         return;
     }
 
-    let selection = match Select::new("  Select a keypair to remove:", keypair_paths.clone()).prompt() {
-        Ok(s) => s,
-        Err(inquire::error::InquireError::OperationCanceled) => {
-            println!("  Operation canceled, exiting program.");
-            std::process::exit(0);
-        },
-        Err(_) => {
-            println!("  Failed to prompt for keypair removal.");
-            return;
-        }
-    };
+    let selection =
+        match Select::new("  Select a keypair to remove:", keypair_paths.clone()).prompt() {
+            Ok(s) => s,
+            Err(inquire::error::InquireError::OperationCanceled) => {
+                println!("  Operation canceled, exiting program.");
+                std::process::exit(0);
+            }
+            Err(_) => {
+                println!("  Failed to prompt for keypair removal.");
+                return;
+            }
+        };
 
     // Check if the user is trying to remove the default keypair
     if selection == replace_home_with_tilde(&solana_default_keypair) {
@@ -278,16 +293,17 @@ fn remove_keypair() {
     keypair_paths.remove(remove_index);
 
     // Write the updated list back to the config file
-    let mut file = fs::File::create(&config_path).expect("Failed to open configuration file for writing.");
+    let mut file =
+        fs::File::create(&config_path).expect("Failed to open configuration file for writing.");
 
     for path in keypair_paths {
         let expanded_path = expand_tilde(&path);
-        writeln!(file, "{}", expanded_path).expect("Failed to write keypair path to configuration file.");
+        writeln!(file, "{}", expanded_path)
+            .expect("Failed to write keypair path to configuration file.");
     }
 
     println!("  Keypair path '{}' has been removed.", selection);
 }
-
 
 fn replace_home_with_tilde(path: &str) -> String {
     if let Some(home_dir) = home_dir() {
@@ -330,7 +346,9 @@ fn ask_for_custom_keypair() -> Option<String> {
             for entry in fs::read_dir(&path_buf).expect("Failed to read directory") {
                 let entry = entry.expect("Failed to get directory entry");
                 let file_path = entry.path();
-                if file_path.is_file() && file_path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if file_path.is_file()
+                    && file_path.extension().and_then(|s| s.to_str()) == Some("json")
+                {
                     let file_path_str = file_path.to_string_lossy().to_string();
                     keypair_files.push(expand_tilde(&file_path_str));
                 }
@@ -345,7 +363,8 @@ fn ask_for_custom_keypair() -> Option<String> {
             let config_path = PathBuf::from(CONFIG_FILE);
             let mut existing_paths = Vec::new();
             if config_path.exists() {
-                let file = fs::File::open(&config_path).expect("Failed to open configuration file.");
+                let file =
+                    fs::File::open(&config_path).expect("Failed to open configuration file.");
                 let reader = io::BufReader::new(file);
                 for line in reader.lines() {
                     if let Ok(path) = line {
@@ -365,8 +384,10 @@ fn ask_for_custom_keypair() -> Option<String> {
             );
 
             if keypair_files.is_empty() {
-                println!("  No new keypair files to add or select. Returning to the previous menu.");
-                return None;  // Returning `None` to indicate no new keypairs were selected
+                println!(
+                    "  No new keypair files to add or select. Returning to the previous menu."
+                );
+                return None; // Returning `None` to indicate no new keypairs were selected
             }
 
             // Update the configuration file with unique paths
@@ -380,13 +401,17 @@ fn ask_for_custom_keypair() -> Option<String> {
             }
 
             // Prompt the user to select a keypair from the directory
-            let selection = match Select::new("  Select a keypair to use from the directory:", keypair_files.clone())
-                .prompt() {
+            let selection = match Select::new(
+                "  Select a keypair to use from the directory:",
+                keypair_files.clone(),
+            )
+            .prompt()
+            {
                 Ok(s) => s,
                 Err(inquire::error::InquireError::OperationCanceled) => {
                     println!("  Operation canceled, exiting program.");
                     std::process::exit(0);
-                },
+                }
                 Err(_) => {
                     println!("  Failed to prompt for keypair selection.");
                     continue;
@@ -411,10 +436,12 @@ fn ask_for_custom_keypair() -> Option<String> {
                 continue;
             }
 
-            let add_to_list = Confirm::new("  Would you like to add this keypair path to the configuration file?")
-                .with_default(true)
-                .prompt()
-                .unwrap_or(true);
+            let add_to_list = Confirm::new(
+                "  Would you like to add this keypair path to the configuration file?",
+            )
+            .with_default(true)
+            .prompt()
+            .unwrap_or(true);
 
             if add_to_list {
                 let config_path = PathBuf::from(CONFIG_FILE);
@@ -454,9 +481,7 @@ fn check_keypair_exists(path: &str) -> bool {
 fn load_keypair(keypair_path: &str) -> Option<solana_sdk::signature::Keypair> {
     use std::panic::{self, AssertUnwindSafe};
 
-    let result = panic::catch_unwind(AssertUnwindSafe(|| {
-        read_keypair_file(keypair_path)
-    }));
+    let result = panic::catch_unwind(AssertUnwindSafe(|| read_keypair_file(keypair_path)));
 
     match result {
         Ok(Ok(keypair)) => Some(keypair),
@@ -472,7 +497,7 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     let version = env!("CARGO_PKG_VERSION");
 
     let options = vec![
-        "  Mine",   
+        "  Mine",
         // "  ProtoMine (Experimental)",
         "  Sign up",
         "  Claim Rewards",
@@ -487,16 +512,20 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
     let selection = match &args.command {
         Some(_) => None,
         None => match Select::new(
-            &format!("Welcome to Ec1ipse Ore HQ Client v{}, what would you like to do?", version), 
-            options
+            &format!(
+                "Welcome to Ec1ipse Ore HQ Client v{}, what would you like to do?",
+                version
+            ),
+            options,
         )
-        .with_page_size(9)  // Set page size to 9 for the main menu
-        .prompt() {
+        .with_page_size(9) // Set page size to 9 for the main menu
+        .prompt()
+        {
             Ok(s) => Some(s),
             Err(inquire::error::InquireError::OperationCanceled) => {
                 println!("  Operation canceled, exiting program.");
                 std::process::exit(0);
-            },
+            }
             Err(_) => {
                 println!("  Failed to prompt for selection.");
                 return Err("  Failed to prompt for selection.".into());
@@ -532,7 +561,14 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     });
 
-    run_command(args.command, key, base_url, unsecure_conn, selection.as_deref()).await?;
+    run_command(
+        args.command,
+        key,
+        base_url,
+        unsecure_conn,
+        selection.as_deref(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -542,33 +578,32 @@ async fn run_command(
     base_url: String,
     unsecure_conn: bool,
     selection: Option<&str>,
-    
 ) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         Some(Commands::Mine(args)) => {
             mine(args, key, base_url, unsecure_conn).await;
-        },
+        }
         Some(Commands::Protomine(args)) => {
             protomine(args, key, base_url, unsecure_conn).await;
-        },
+        }
         Some(Commands::Signup) => {
             signup(base_url, key, unsecure_conn).await;
-        },
+        }
         Some(Commands::Claim(args)) => {
             claim::claim(args, key, base_url, unsecure_conn).await;
-        },
+        }
         Some(Commands::Balance) => {
             balance(&key, base_url, unsecure_conn).await;
-        },
+        }
         Some(Commands::Stake(args)) => {
             delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
-        },
+        }
         Some(Commands::Unstake(args)) => {
             undelegate_stake::undelegate_stake(args, &key, base_url, unsecure_conn).await;
-        },
+        }
         Some(Commands::StakeBalance) => {
             stake_balance::stake_balance(&key, base_url, unsecure_conn).await;
-        },
+        }
         None => {
             if let Some(choice) = selection {
                 match choice {
@@ -577,28 +612,34 @@ async fn run_command(
                             let input = Text::new("  Enter the number of threads:")
                                 .with_default("4")
                                 .prompt()?;
-                            
-                            let buffer_input = Text::new("  Enter the buffer time in seconds (optional):")
-                                .with_default("0")
-                                .prompt()?;
 
-                            match (input.trim().parse::<u32>(), buffer_input.trim().parse::<u32>()) {
-                                (Ok(valid_threads), Ok(valid_buffer)) if valid_threads > 0 => break (valid_threads, valid_buffer),
+                            let buffer_input =
+                                Text::new("  Enter the buffer time in seconds (optional):")
+                                    .with_default("0")
+                                    .prompt()?;
+
+                            match (
+                                input.trim().parse::<u32>(),
+                                buffer_input.trim().parse::<u32>(),
+                            ) {
+                                (Ok(valid_threads), Ok(valid_buffer)) if valid_threads > 0 => {
+                                    break (valid_threads, valid_buffer)
+                                }
                                 _ => {
                                     println!("  Invalid input. Please enter valid numbers greater than 0.");
                                 }
                             }
                         };
-            
+
                         let args = MineArgs { threads, buffer };
                         mine(args, key, base_url, unsecure_conn).await;
-                    },
+                    }
                     "  ProtoMine" => {
                         let threads: u32 = loop {
                             let input = Text::new("  Enter the number of threads:")
                                 .with_default("4")
                                 .prompt()?;
-            
+
                             match input.trim().parse::<u32>() {
                                 Ok(valid_threads) if valid_threads > 0 => break valid_threads,
                                 _ => {
@@ -606,70 +647,84 @@ async fn run_command(
                                 }
                             }
                         };
-            
-                        let args = ProtoMineArgs { threads: threads.try_into().unwrap() };
+
+                        let args = ProtoMineArgs {
+                            threads: threads.try_into().unwrap(),
+                        };
                         protomine(args, key, base_url, unsecure_conn).await;
-                    },
+                    }
                     "  Sign up" => {
                         signup(base_url, key, unsecure_conn).await;
-                    },
+                    }
                     "  Claim Rewards" => {
                         let args = ClaimArgs { amount: None };
                         claim::claim(args, key, base_url, unsecure_conn).await;
-                    },
+                    }
                     "  View Balances" => {
                         balance(&key, base_url, unsecure_conn).await;
-                    },
+                    }
                     "  Stake" => {
-    balance(&key, base_url.clone(), unsecure_conn).await;
+                        balance(&key, base_url.clone(), unsecure_conn).await;
 
-    loop {
-        let stake_input = Text::new("  Enter the amount of ore to stake (or 'esc' to cancel):")
-            .prompt();
+                        loop {
+                            let stake_input = Text::new(
+                                "  Enter the amount of ore to stake (or 'esc' to cancel):",
+                            )
+                            .prompt();
 
-        match stake_input {
-            Ok(input) => {
-                let input = input.trim();
-                if input.eq_ignore_ascii_case("esc") {
-                    println!("  Staking operation canceled.");
-                    break;
-                }
+                            match stake_input {
+                                Ok(input) => {
+                                    let input = input.trim();
+                                    if input.eq_ignore_ascii_case("esc") {
+                                        println!("  Staking operation canceled.");
+                                        break;
+                                    }
 
-                match input.parse::<f64>() {
-                    Ok(stake_amount) if stake_amount > 0.0 => {
-                        let args = delegate_stake::StakeArgs {
-                            amount: stake_amount,
-                            auto: true, // Auto-staking by default
-                        };
-                        delegate_stake::delegate_stake(args, key, base_url.clone(), unsecure_conn).await;
-                        break;
+                                    match input.parse::<f64>() {
+                                        Ok(stake_amount) if stake_amount > 0.0 => {
+                                            let args = delegate_stake::StakeArgs {
+                                                amount: stake_amount,
+                                                auto: true, // Auto-staking by default
+                                            };
+                                            delegate_stake::delegate_stake(
+                                                args,
+                                                key,
+                                                base_url.clone(),
+                                                unsecure_conn,
+                                            )
+                                            .await;
+                                            break;
+                                        }
+                                        Ok(_) => {
+                                            println!(
+                                                "  Please enter a valid number greater than 0."
+                                            );
+                                        }
+                                        Err(_) => {
+                                            println!("  Please enter a valid number.");
+                                        }
+                                    }
+                                }
+                                Err(inquire::error::InquireError::OperationCanceled) => {
+                                    println!("  Staking operation canceled.");
+                                    break;
+                                }
+                                Err(_) => {
+                                    println!("  Invalid input. Please try again.");
+                                }
+                            }
+                        }
                     }
-                    Ok(_) => {
-                        println!("  Please enter a valid number greater than 0.");
-                    }
-                    Err(_) => {
-                        println!("  Please enter a valid number.");
-                    }
-                }
-            },
-            Err(inquire::error::InquireError::OperationCanceled) => {
-                println!("  Staking operation canceled.");
-                break;
-            },
-            Err(_) => {
-                println!("  Invalid input. Please try again.");
-            }
-        }
-    }
-},
 
                     "  Unstake" => {
                         stake_balance::stake_balance(&key, base_url.clone(), unsecure_conn).await;
 
                         loop {
-                            let unstake_input = Text::new("  Enter the amount of ore to unstake (or 'esc' to cancel):")
-                                .prompt();
-                        
+                            let unstake_input = Text::new(
+                                "  Enter the amount of ore to unstake (or 'esc' to cancel):",
+                            )
+                            .prompt();
+
                             match unstake_input {
                                 Ok(input) => {
                                     let input = input.trim();
@@ -683,31 +738,39 @@ async fn run_command(
                                             let args = undelegate_stake::UnstakeArgs {
                                                 amount: unstake_amount,
                                             };
-                                            undelegate_stake::undelegate_stake(args, &key, base_url.clone(), unsecure_conn).await;
+                                            undelegate_stake::undelegate_stake(
+                                                args,
+                                                &key,
+                                                base_url.clone(),
+                                                unsecure_conn,
+                                            )
+                                            .await;
                                             break;
                                         }
                                         Ok(_) => {
-                                            println!("  Please enter a valid number greater than 0.");
+                                            println!(
+                                                "  Please enter a valid number greater than 0."
+                                            );
                                         }
                                         Err(_) => {
                                             println!("  Please enter a valid number.");
                                         }
                                     }
-                                },
+                                }
                                 Err(inquire::error::InquireError::OperationCanceled) => {
                                     println!("  Unstaking operation canceled.");
                                     break;
-                                },
+                                }
                                 Err(_) => {
                                     println!("  Invalid input. Please try again.");
                                 }
                             }
                         }
-                    },
+                    }
                     _ => println!("  Unknown selection."),
                 }
             }
-        },
+        }
     }
 
     Ok(())

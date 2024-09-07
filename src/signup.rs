@@ -1,7 +1,10 @@
 use std::str::FromStr;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
-use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction, transaction::Transaction};
+use solana_sdk::{
+    pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction,
+    transaction::Transaction,
+};
 
 pub async fn signup(url: String, key: Keypair, unsecure: bool) {
     let base_url = url;
@@ -14,11 +17,28 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
         "https".to_string()
     };
 
-    let resp = client.get(format!("{}://{}/pool/authority/pubkey", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
+    let resp = client
+        .get(format!(
+            "{}://{}/pool/authority/pubkey",
+            url_prefix, base_url
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
 
     let pool_pubkey = Pubkey::from_str(&resp).unwrap();
 
-    let resp = client.get(format!("{}://{}/latest-blockhash", url_prefix, base_url)).send().await.unwrap().text().await.unwrap();
+    let resp = client
+        .get(format!("{}://{}/latest-blockhash", url_prefix, base_url))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
 
     let decoded_blockhash = BASE64_STANDARD.decode(resp).unwrap();
     let deserialized_blockhash = bincode::deserialize(&decoded_blockhash).unwrap();
@@ -33,14 +53,22 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
 
     let encoded_tx = BASE64_STANDARD.encode(&serialized_tx);
 
-    let resp = client.post(format!("{}://{}/signup?pubkey={}", url_prefix, base_url, key.pubkey().to_string())).body(encoded_tx).send().await;
+    let resp = client
+        .post(format!(
+            "{}://{}/signup?pubkey={}",
+            url_prefix,
+            base_url,
+            key.pubkey().to_string()
+        ))
+        .body(encoded_tx)
+        .send()
+        .await;
     if let Ok(res) = resp {
         if let Ok(txt) = res.text().await {
-
             match txt.as_str() {
                 "SUCCESS" => {
                     println!("  Successfully signed up!");
-                },
+                }
                 "EXISTS" => {
                     println!("  You're already signed up!");
                 }

@@ -1,9 +1,9 @@
-use inquire::{Text, InquireError};
-use std::time::Duration;
 use clap::Parser;
-use solana_sdk::{signature::Keypair, signer::Signer};
 use colored::*;
+use inquire::{InquireError, Text};
+use solana_sdk::{signature::Keypair, signer::Signer};
 use spl_token::amount_to_ui_amount;
+use std::time::Duration;
 
 #[derive(Debug, Parser)]
 pub struct ClaimArgs {
@@ -24,18 +24,18 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     };
 
     let balance_response = client
-    .get(format!(
-        "{}://{}/miner/balance?pubkey={}",
-        url_prefix,
-        url,
-        key.pubkey().to_string()
-    ))
-    .send()
-    .await
-    .unwrap()
-    .text()
-    .await
-    .unwrap();
+        .get(format!(
+            "{}://{}/miner/balance?pubkey={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
 
     let balance = if let Ok(parsed_balance) = balance_response.parse::<f64>() {
         parsed_balance
@@ -45,31 +45,31 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         0.0
     };
 
-let rewards_response = client
-    .get(format!(
-        "{}://{}/miner/rewards?pubkey={}",
-        url_prefix,
-        url,
-        key.pubkey().to_string()
-    ))
-    .send()
-    .await
-    .unwrap()
-    .text()
-    .await
-    .unwrap();
+    let rewards_response = client
+        .get(format!(
+            "{}://{}/miner/rewards?pubkey={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
 
-let rewards = rewards_response.parse::<f64>().unwrap_or(0.0);
+    let rewards = rewards_response.parse::<f64>().unwrap_or(0.0);
 
-println!("  Unclaimed Rewards: {:.11} ORE", rewards);
-println!("  Wallet Balance:    {:.11} ORE", balance);
+    println!("  Unclaimed Rewards: {:.11} ORE", rewards);
+    println!("  Wallet Balance:    {:.11} ORE", balance);
 
-if rewards < 0.005 {
-    println!();
-    println!("  You have not reached the required claim limit of 0.005 ORE.");
-    println!("  Keep mining to accumulate more rewards before you can withdraw.");
-    return;
-}
+    if rewards < 0.005 {
+        println!();
+        println!("  You have not reached the required claim limit of 0.005 ORE.");
+        println!("  Keep mining to accumulate more rewards before you can withdraw.");
+        return;
+    }
 
     // Convert balance to grains
     let balance_grains = (rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
@@ -85,7 +85,8 @@ if rewards < 0.005 {
     // Prompt the user for an amount if it's not provided or less than 0.005
     loop {
         if claim_amount < 0.005 {
-            if claim_amount != 0.0 { // Only show the message if they previously entered an invalid value
+            if claim_amount != 0.0 {
+                // Only show the message if they previously entered an invalid value
                 println!("  Please enter a number above 0.005.");
             }
 
@@ -121,7 +122,8 @@ if rewards < 0.005 {
     }
 
     // Convert the claim amount to the smallest unit
-    let mut claim_amount_grains = (claim_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+    let mut claim_amount_grains =
+        (claim_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
 
     // Auto-adjust the claim amount if it exceeds the available balance
     if claim_amount_grains > balance_grains {
@@ -137,35 +139,35 @@ if rewards < 0.005 {
     }
 
     // RED TEXT
-match Text::new(
-    &format!(
-        "  Are you sure you want to claim {} ORE? (Y/n or 'esc' to cancel)",
-        amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
+    match Text::new(
+        &format!(
+            "  Are you sure you want to claim {} ORE? (Y/n or 'esc' to cancel)",
+            amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
+        )
+        .red()
+        .to_string(),
     )
-    .red()
-    .to_string(),
-)
-.prompt()
-{
-    Ok(confirm) => {
-        if confirm.trim().eq_ignore_ascii_case("esc") {
-            println!("  Claim canceled.");
+    .prompt()
+    {
+        Ok(confirm) => {
+            if confirm.trim().eq_ignore_ascii_case("esc") {
+                println!("  Claim canceled.");
+                return;
+            } else if confirm.trim().is_empty() || confirm.trim().to_lowercase() == "y" {
+            } else {
+                println!("  Claim canceled.");
+                return;
+            }
+        }
+        Err(InquireError::OperationCanceled) => {
+            println!("  Claim operation canceled.");
             return;
-        } else if confirm.trim().is_empty() || confirm.trim().to_lowercase() == "y" {
-        } else {
-            println!("  Claim canceled.");
+        }
+        Err(_) => {
+            println!("  Invalid input. Claim canceled.");
             return;
         }
     }
-    Err(InquireError::OperationCanceled) => {
-        println!("  Claim operation canceled.");
-        return;
-    }
-    Err(_) => {
-        println!("  Invalid input. Claim canceled.");
-        return;
-    }
-}
 
     println!(
         "  Sending claim request for {} ORE...",
