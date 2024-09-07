@@ -37,7 +37,13 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     .await
     .unwrap();
 
-let balance = balance_response.parse::<f64>().unwrap_or(0.0);
+    let balance = if let Ok(parsed_balance) = balance_response.parse::<f64>() {
+        parsed_balance
+    } else {
+        // If the wallet balance failed to parse
+        println!("\n  Note: A 0.004 ORE fee will be deducted from your claim amount to cover the cost\n  of Token Account Creation. This is a one time fee used to create the ORE Token Account.");
+        0.0
+    };
 
 let rewards_response = client
     .get(format!(
@@ -57,11 +63,6 @@ let rewards = rewards_response.parse::<f64>().unwrap_or(0.0);
 
 println!("  Unclaimed Rewards: {:.11} ORE", rewards);
 println!("  Wallet Balance:    {:.11} ORE", balance);
-
-// Check if the wallet balance is zero and display the note
-if balance == 0.0 {
-    println!("\n  Note: A 0.004 ORE fee will be deducted from your claim amount to cover the cost\n  of Token Account Creation. This is a one time fee used to create the ORE Token Account.");
-}
 
 if rewards < 0.005 {
     println!();
