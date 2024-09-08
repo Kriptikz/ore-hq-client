@@ -50,6 +50,14 @@ struct Args {
     )]
     use_http: bool,
 
+    #[arg(
+        long,
+        short,
+        action,
+        help = "Use vim mode for menu navigation."
+    )]
+    vim: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -115,13 +123,13 @@ async fn main() {
             }
         } else {
             // No command provided, run the menu
-            if let Err(_) = run_menu().await {
+            if let Err(_) = run_menu(args.vim).await {
                 println!("  An error occurred, exiting program.");
             }
         }
     } else {
         // The keypair does not exist, proceed directly to the menu without showing an error
-        if let Err(_) = run_menu().await {
+        if let Err(_) = run_menu(args.vim).await {
             println!("  An error occurred, exiting program.");
         }
     }
@@ -492,7 +500,7 @@ fn load_keypair(keypair_path: &str) -> Option<solana_sdk::signature::Keypair> {
     }
 }
 
-async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let version = env!("CARGO_PKG_VERSION");
 
@@ -519,6 +527,7 @@ async fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
             options,
         )
         .with_page_size(9) // Set page size to 9 for the main menu
+        .with_vim_mode(vim_mode)
         .prompt()
         {
             Ok(s) => Some(s),
