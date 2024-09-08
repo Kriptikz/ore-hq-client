@@ -1,9 +1,14 @@
 use base64::prelude::*;
 use clap::{arg, Parser};
-use drillx_2::equix;
+use drillx_2::{equix, Hash};
+use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use solana_sdk::{signature::Keypair, signer::Signer};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::RwLock;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
@@ -23,6 +28,19 @@ use tokio_tungstenite::{
 #[derive(Debug)]
 pub enum ServerMessage {
     StartMining([u8; 32], Range<u64>, u64),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadSubmission {
+    nonce: u64,
+    difficulty: u32,
+    pub d: [u8; 16], // digest
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MessageSubmissionSystem {
+    Submission(ThreadSubmission),
+    Reset,
 }
 
 #[derive(Debug, Parser)]
@@ -45,6 +63,7 @@ pub struct MineArgs {
 
 pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
     let running = Arc::new(AtomicBool::new(true));
+    let key = Arc::new(key);
 
     loop {
         if !running.load(Ordering::SeqCst) {
@@ -122,7 +141,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             Ok((ws_stream, _)) => {
                 println!("Connected to network!");
 
-                let (mut sender, mut receiver) = ws_stream.split();
+                let (sender, mut receiver) = ws_stream.split();
                 let (message_sender, mut message_receiver) =
                     tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
 
@@ -132,6 +151,16 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             break;
                         }
                     }
+                });
+
+                let (solution_system_message_sender, solution_system_message_receiver) =
+                    tokio::sync::mpsc::unbounded_channel::<MessageSubmissionSystem>();
+
+                let sender = Arc::new(Mutex::new(sender));
+                let app_key = key.clone();
+                let app_socket_sender = sender.clone();
+                tokio::spawn(async move {
+                    submission_system(app_key, solution_system_message_receiver, app_socket_sender).await;
                 });
 
                 // send Ready message
@@ -148,12 +177,13 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 bin_data.extend_from_slice(&msg);
                 bin_data.extend(sig);
 
-                let _ = sender.send(Message::Binary(bin_data)).await;
-
-                let sender = Arc::new(Mutex::new(sender));
+                let mut lock = sender.lock().await;
+                let _ = lock.send(Message::Binary(bin_data)).await;
+                drop(lock);
 
                 // receive messages
                 let message_sender = sender.clone();
+                let system_submission_sender = Arc::new(solution_system_message_sender);
                 while let Some(msg) = message_receiver.recv().await {
                     if !running.load(Ordering::SeqCst) {
                         break;
@@ -161,11 +191,16 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
+                            println!("\nNext Challenge: {}", BASE64_STANDARD.encode(challenge));
+                            println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
+                            println!("Cutoff in: {}s", cutoff);
+
                             // Adjust the cutoff with the buffer
                             let mut cutoff = cutoff.saturating_sub(args.buffer as u64);
                             if cutoff > 60 {
                                 cutoff = 55;
                             }
+
 
                             // Detect if running on Windows and set symbols accordingly
                             let pb = if env::consts::OS == "windows" {
@@ -198,6 +233,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 .into_iter()
                                 .map(|i| {
                                     let running = running.clone(); // Capture running in thread
+                                    let system_submission_sender = system_submission_sender.clone();
                                     std::thread::spawn({
                                         let mut memory = equix::SolverMemory::new();
                                         move || {
@@ -229,7 +265,13 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                                 ) {
                                                     total_hashes += 1;
                                                     let difficulty = hx.difficulty();
-                                                    if difficulty.gt(&best_difficulty) {
+                                                    if difficulty.gt(&7) && difficulty.gt(&best_difficulty) {
+                                                        let thread_submission = ThreadSubmission{
+                                                                nonce,
+                                                                difficulty,
+                                                                d: hx.d,
+                                                        };
+                                                        let _ = system_submission_sender.send(MessageSubmissionSystem::Submission(thread_submission));
                                                         best_nonce = nonce;
                                                         best_difficulty = difficulty;
                                                         best_hash = hx;
@@ -266,19 +308,15 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 .collect::<Vec<_>>();
 
                             // Join handles and return best nonce
-                            let mut best_nonce: u64 = 0;
                             let mut best_difficulty = 0;
-                            let mut best_hash = drillx_2::Hash::default();
                             let mut total_nonces_checked = 0;
                             for h in handles {
-                                if let Ok(Some((nonce, difficulty, hash, nonces_checked))) =
+                                if let Ok(Some((_nonce, difficulty, _hash, nonces_checked))) =
                                     h.join()
                                 {
                                     total_nonces_checked += nonces_checked;
                                     if difficulty > best_difficulty {
                                         best_difficulty = difficulty;
-                                        best_nonce = nonce;
-                                        best_hash = hash;
                                     }
                                 }
                             }
@@ -298,36 +336,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 );
                             }
 
-                            // Send results to the server
-                            let message_type = 2u8; // 1 u8 - BestSolution Message
-                            let best_hash_bin = best_hash.d; // 16 u8
-                            let best_nonce_bin = best_nonce.to_le_bytes(); // 8 u8
+                            let _ = system_submission_sender.send(MessageSubmissionSystem::Reset);
 
-                            let mut hash_nonce_message = [0; 24];
-                            hash_nonce_message[0..16].copy_from_slice(&best_hash_bin);
-                            hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
-                            let signature = key
-                                .sign_message(&hash_nonce_message)
-                                .to_string()
-                                .as_bytes()
-                                .to_vec();
+                            //tokio::time::sleep(Duration::from_secs(5 + args.buffer as u64)).await;
 
-                            let mut bin_data = [0; 57];
-                            bin_data[00..1].copy_from_slice(&message_type.to_le_bytes());
-                            bin_data[01..17].copy_from_slice(&best_hash_bin);
-                            bin_data[17..25].copy_from_slice(&best_nonce_bin);
-                            bin_data[25..57].copy_from_slice(&key.pubkey().to_bytes());
-
-                            let mut bin_vec = bin_data.to_vec();
-                            bin_vec.extend(signature);
-
-                            {
-                                let mut message_sender = message_sender.lock().await;
-                                let _ = message_sender.send(Message::Binary(bin_vec)).await;
-                            }
-
-                            tokio::time::sleep(Duration::from_secs(5 + args.buffer as u64)).await;
-
+                            // Ready up again
                             let now = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .expect("Time went backwards")
@@ -375,7 +388,7 @@ fn process_message(
 ) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
-            println!("{}", t);
+            println!("\n\n{}\n", t);
         }
         Message::Binary(b) => {
             let message_type = b[0];
@@ -434,4 +447,51 @@ fn process_message(
     }
 
     ControlFlow::Continue(())
+}
+
+async fn submission_system(key: Arc<Keypair>, mut system_message_receiver: UnboundedReceiver<MessageSubmissionSystem>, socket_sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>) {
+    let mut best_diff = 0;
+    while let Some(msg) = system_message_receiver.recv().await {
+        match msg {
+            MessageSubmissionSystem::Submission(thread_submission) => {
+                if thread_submission.difficulty > best_diff {
+                    best_diff = thread_submission.difficulty;
+
+                    // Send results to the server
+                    let message_type = 2u8; // 1 u8 - BestSolution Message
+                    let best_hash_bin = thread_submission.d; // 16 u8
+                    let best_nonce_bin = thread_submission.nonce.to_le_bytes(); // 8 u8
+
+                    let mut hash_nonce_message = [0; 24];
+                    hash_nonce_message[0..16].copy_from_slice(&best_hash_bin);
+                    hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
+                    let signature = key
+                        .sign_message(&hash_nonce_message)
+                        .to_string()
+                        .as_bytes()
+                        .to_vec();
+
+                    let mut bin_data = [0; 57];
+                    bin_data[00..1].copy_from_slice(&message_type.to_le_bytes());
+                    bin_data[01..17].copy_from_slice(&best_hash_bin);
+                    bin_data[17..25].copy_from_slice(&best_nonce_bin);
+                    bin_data[25..57].copy_from_slice(&key.pubkey().to_bytes());
+
+                    let mut bin_vec = bin_data.to_vec();
+                    bin_vec.extend(signature);
+
+                    let mut message_sender = socket_sender.lock().await;
+                    let _ = message_sender.send(Message::Binary(bin_vec)).await;
+                    drop(message_sender);
+                }
+            }
+            MessageSubmissionSystem::Reset => {
+                best_diff = 0;
+
+                // Sleep for 2 seconds to let the submission window open again
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        } 
+    }
+
 }
