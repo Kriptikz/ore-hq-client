@@ -279,21 +279,28 @@ pub async fn delegate_stake(args: StakeArgs, key: Keypair, url: String, unsecure
 
 // Helper function to fetch server timestamp
 async fn get_timestamp(client: &reqwest::Client, url_prefix: &str, base_url: &str) -> u64 {
-    if let Ok(response) = client
-        .get(format!("{}://{}/timestamp", url_prefix, base_url))
-        .send()
-        .await
-    {
-        match response.status() {
-            StatusCode::OK => {
-                if let Ok(ts) = response.text().await {
-                    if let Ok(ts) = ts.parse::<u64>() {
-                        return ts;
+    loop {
+        if let Ok(response) = client
+            .get(format!("{}://{}/timestamp", url_prefix, base_url))
+            .send()
+            .await
+        {
+            match response.status() {
+                StatusCode::OK => {
+                    if let Ok(ts) = response.text().await {
+                        if let Ok(ts) = ts.parse::<u64>() {
+                            return ts;
+                        }
                     }
                 }
+                _ => {
+                    println!("  Server restarting, trying again in 3 seconds...");
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
             }
-            _ => panic!("  Server restarting, trying again in 3 seconds..."),
         }
+        println!("  Unable to retrieve timestamp, retrying in 3 seconds...");
+        tokio::time::sleep(Duration::from_secs(3)).await;
     }
-    panic!("  Unable to retrieve timestamp, retrying...");
 }
