@@ -203,7 +203,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
 
                             // Detect if running on Windows and set symbols accordingly
-                            let pb = if env::consts::OS == "windows" {
+                            let pb = if env::consts::OS == "windows" || env::var("WSL_DISTRO_NAME").is_ok() {
                                 ProgressBar::new_spinner().with_style(
                                     ProgressStyle::default_spinner()
                                         .tick_strings(&["-", "\\", "|", "/"]) // Use simple ASCII symbols
@@ -216,12 +216,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                         .tick_strings(&[
                                             "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
                                         ])
-                                        .template("{spinner:.red} {msg}")
+                                        .template("{spinner:.green} {msg}")
                                         .expect("Failed to set progress bar template"),
                                 )
                             };
 
-                            println!();
                             pb.set_message("Mining...");
                             pb.enable_steady_tick(Duration::from_millis(120));
 
@@ -389,7 +388,7 @@ fn process_message(
 ) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
-            println!("\n\n{}\n", t);
+            println!("{}", t);
         }
         Message::Binary(b) => {
             let message_type = b[0];
