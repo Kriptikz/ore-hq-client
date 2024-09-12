@@ -326,6 +326,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             // Stop the spinner after mining is done
                             pb.finish_and_clear();
                             println!("✔ Mining complete!");
+                            println!("Client found diff: {}", best_difficulty);
                             println!("Processed: {}", total_nonces_checked);
                             println!("Hash time: {:?}", hash_time);
                             let hash_time_secs = hash_time.as_secs();
