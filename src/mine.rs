@@ -476,6 +476,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                             "Hashpower: {:?} H/s",
                                             total_nonces_checked.saturating_div(hash_time_secs)
                                         );
+                                        println!("Client found diff: {}", best_difficulty);
                                     }
 
                                     let _ = system_submission_sender.send(MessageSubmissionSystem::Reset);
@@ -548,7 +549,7 @@ fn process_message(
 ) -> ControlFlow<(), ()> {
     match msg {
         Message::Text(t) => {
-            println!("\n\n{}\n", t);
+            println!("{}", t);
         }
         Message::Binary(b) => {
             let message_type = b[0];

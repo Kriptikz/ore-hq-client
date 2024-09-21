@@ -2080,7 +2080,7 @@ dependencies = [
 
 [[package]]
 name = "ore-hq-client"
-version = "2.2.1"
+version = "2.2.3"
 dependencies = [
  "base64 0.22.1",
  "bincode",

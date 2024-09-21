@@ -10,6 +10,7 @@ use solana_sdk::signature::read_keypair_file;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use core_affinity::get_core_ids;
 
 mod balance;
 mod claim;
@@ -617,25 +618,35 @@ async fn run_command(
             if let Some(choice) = selection {
                 match choice {
                     "  Mine" => {
-                        let (threads, buffer): (u32, u32) = loop {
-                            let input = Text::new("  Enter the number of threads:")
-                                .with_default("4")
+                        let core_ids = get_core_ids().unwrap();
+                        let max_threads = core_ids.len();
+
+                        // Ask for the number of threads
+                        let threads: u32 = loop {
+                            let input = Text::new(&format!(
+                                "  Enter the number of threads (default: {}):", max_threads
+                            ))
+                            .with_default(&max_threads.to_string())
+                            .prompt()?;
+
+                            match input.trim().parse::<u32>() {
+                                Ok(valid_threads) if valid_threads > 0 && valid_threads <= max_threads as u32 => break valid_threads,
+                                _ => {
+                                    println!("  Invalid thread count. Please enter a number between 1 and {}.", max_threads);
+                                }
+                            }
+                        };
+
+                        // Ask for buffer time
+                        let buffer: u32 = loop {
+                            let buffer_input = Text::new("  Enter the buffer time in seconds (optional):")
+                                .with_default("0")
                                 .prompt()?;
 
-                            let buffer_input =
-                                Text::new("  Enter the buffer time in seconds (optional):")
-                                    .with_default("0")
-                                    .prompt()?;
-
-                            match (
-                                input.trim().parse::<u32>(),
-                                buffer_input.trim().parse::<u32>(),
-                            ) {
-                                (Ok(valid_threads), Ok(valid_buffer)) if valid_threads > 0 => {
-                                    break (valid_threads, valid_buffer)
-                                }
+                            match buffer_input.trim().parse::<u32>() {
+                                Ok(valid_buffer) => break valid_buffer,
                                 _ => {
-                                    println!("  Invalid input. Please enter valid numbers greater than 0.");
+                                    println!("  Invalid buffer input. Please enter a valid number.");
                                 }
                             }
                         };
@@ -643,6 +654,7 @@ async fn run_command(
                         let args = MineArgs { threads, buffer };
                         mine(args, key, base_url, unsecure_conn).await;
                     }
+
                     "  ProtoMine" => {
                         let threads: u32 = loop {
                             let input = Text::new("  Enter the number of threads:")
