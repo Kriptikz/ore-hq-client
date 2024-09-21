@@ -1,6 +1,6 @@
 [package]
 name = "ore-hq-client"
-version = "2.2.2"
+version = "2.2.3"
 edition = "2021"
 description = "Ore mining pool client."
 license = "Apache-2.0"
@@ -28,12 +28,12 @@ crossbeam = "0.8.0"
 rand = "0.8.4"
 rand_chacha = "0.3.0"
 inquire = "0.7.5"
-home = "0.5.9"
 dirs = "5.0.1"
 colored = "2.0"
 indicatif = "0.17"
 spl-associated-token-account = { version = "2.2", features = ["no-entrypoint"] }
 ore-miner-delegation = { version = "0.4.0", features = ["no-entrypoint"] }
+tiny-bip39 = "0.8.2"
 
 
 [profile.release]
