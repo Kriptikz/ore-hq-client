@@ -339,7 +339,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     println!("Cutoff in: {}s", cutoff);
 
                                     // Adjust the cutoff with the buffer
-                                    let mut cutoff = cutoff.saturating_sub(args.buffer as u64) + 5;
+                                    let mut cutoff = cutoff.saturating_sub(args.buffer as u64);
                                     if cutoff > 60 {
                                         cutoff = 55;
                                     }
