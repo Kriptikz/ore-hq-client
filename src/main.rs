@@ -20,6 +20,7 @@ mod protomine;
 mod signup;
 mod stake_balance;
 mod undelegate_stake;
+mod generate_key;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -81,6 +82,8 @@ enum Commands {
     Unstake(undelegate_stake::UnstakeArgs),
     #[command(about = "Delegated stake balance.")]
     StakeBalance,
+    #[command(about = "Generate a new solana keypair for mining.")]
+    GenerateKeypair,
 }
 
 #[derive(Debug, Subcommand)]
@@ -613,6 +616,9 @@ async fn run_command(
         }
         Some(Commands::StakeBalance) => {
             stake_balance::stake_balance(&key, base_url, unsecure_conn).await;
+        }
+        Some(Commands::GenerateKeypair) => {
+            generate_key::generate_key().await;
         }
         None => {
             if let Some(choice) = selection {
