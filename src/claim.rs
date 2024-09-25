@@ -13,6 +13,13 @@ pub struct ClaimArgs {
         help = "Amount of ore to claim. (Minimum of 0.005 ORE)"
     )]
     pub amount: Option<f64>,
+    #[arg(
+        long,
+        short,
+        action,
+        help = "Auto approve confirmations."
+    )]
+    pub y: bool,
 }
 
 pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
@@ -80,7 +87,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         return;
     }
 
-    let mut claim_amount = args.amount.unwrap_or(0.0);
+    let mut claim_amount = args.amount.unwrap_or(rewards);
 
     // Prompt the user for an amount if it's not provided or less than 0.005
     loop {
@@ -139,33 +146,35 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     }
 
     // RED TEXT
-    match Text::new(
-        &format!(
-            "  Are you sure you want to claim {} ORE? (Y/n or 'esc' to cancel)",
-            amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
+    if !args.y {
+        match Text::new(
+            &format!(
+                "  Are you sure you want to claim {} ORE? (Y/n or 'esc' to cancel)",
+                amount_to_ui_amount(claim_amount_grains, ore_api::consts::TOKEN_DECIMALS)
+            )
+            .red()
+            .to_string(),
         )
-        .red()
-        .to_string(),
-    )
-    .prompt()
-    {
-        Ok(confirm) => {
-            if confirm.trim().eq_ignore_ascii_case("esc") {
-                println!("  Claim canceled.");
-                return;
-            } else if confirm.trim().is_empty() || confirm.trim().to_lowercase() == "y" {
-            } else {
-                println!("  Claim canceled.");
+        .prompt()
+        {
+            Ok(confirm) => {
+                if confirm.trim().eq_ignore_ascii_case("esc") {
+                    println!("  Claim canceled.");
+                    return;
+                } else if confirm.trim().is_empty() || confirm.trim().to_lowercase() == "y" {
+                } else {
+                    println!("  Claim canceled.");
+                    return;
+                }
+            }
+            Err(InquireError::OperationCanceled) => {
+                println!("  Claim operation canceled.");
                 return;
             }
-        }
-        Err(InquireError::OperationCanceled) => {
-            println!("  Claim operation canceled.");
-            return;
-        }
-        Err(_) => {
-            println!("  Invalid input. Claim canceled.");
-            return;
+            Err(_) => {
+                println!("  Invalid input. Claim canceled.");
+                return;
+            }
         }
     }
 
@@ -188,7 +197,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     match resp {
         Ok(res) => match res.text().await.unwrap().as_str() {
             "SUCCESS" => {
-                println!("  Successfully claimed rewards!");
+                println!("  Successfully queued claim request!");
             }
             "QUEUED" => {
                 println!("  Claim is already queued for processing.");
