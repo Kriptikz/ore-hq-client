@@ -34,7 +34,8 @@ indicatif = "0.17"
 spl-associated-token-account = { version = "2.2", features = ["no-entrypoint"] }
 ore-miner-delegation = { version = "0.4.0", features = ["no-entrypoint"] }
 tiny-bip39 = "0.8.2"
-
+qrcode = "0.14.1"
+futures = "0.3"
 
 [profile.release]
 opt-level = 3     # Full optimisations
