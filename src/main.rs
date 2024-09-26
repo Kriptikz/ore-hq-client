@@ -11,6 +11,7 @@ use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use core_affinity::get_core_ids;
+use generate_key::generate_key;
 
 mod balance;
 mod claim;
@@ -84,14 +85,6 @@ enum Commands {
     StakeBalance,
     #[command(about = "Generate a new solana keypair for mining.")]
     GenerateKeypair,
-}
-
-#[derive(Debug, Subcommand)]
-enum StakeCommands {
-    #[command(about = "Delegate stake for the pool miner.")]
-    Stake(delegate_stake::StakeArgs),
-    #[command(about = "Undelegate stake from the pool miner.")]
-    Unstake(undelegate_stake::UnstakeArgs),
 }
 
 #[tokio::main]
@@ -197,13 +190,47 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
         }
     }
 
-    // Hardcode check for the default Solana keypair
+    // Hardcode check for both default Solana keypairs
     let solana_default_keypair = expand_tilde("~/.config/solana/id.json");
-    if PathBuf::from(&solana_default_keypair).exists()
-        && !seen_paths.contains(&solana_default_keypair)
-    {
+    let hot_wallet_keypair = expand_tilde("~/.config/solana/mining-hot-wallet.json");
+
+    let default_keypair_exists = PathBuf::from(&solana_default_keypair).exists();
+    let hot_wallet_exists = PathBuf::from(&hot_wallet_keypair).exists();
+
+    if !default_keypair_exists && !hot_wallet_exists && keypair_paths.is_empty() {
+        println!("  No keypairs found and no id.json or mining-hot-wallet.json file exists.");
+    
+        // Prompt the user if they want to generate a new keypair
+        let generate_new_keypair = Confirm::new("  Would you like to generate a new keypair?")
+            .with_default(true)
+            .prompt()
+            .unwrap_or(false);
+    
+        if generate_new_keypair {
+            
+            tokio::task::block_in_place(|| {
+                futures::executor::block_on(async {
+                    generate_key().await;
+                });
+            });
+    
+            println!("  Keypair generated successfully. Exiting program.");
+        } else {
+            println!("  Exiting program without generating a keypair.");
+        }
+    
+        std::process::exit(0);
+    }
+    
+
+    if default_keypair_exists && !seen_paths.contains(&solana_default_keypair) {
         keypair_paths.push(replace_home_with_tilde(&solana_default_keypair));
         seen_paths.insert(solana_default_keypair);
+    }
+
+    if hot_wallet_exists && !seen_paths.contains(&hot_wallet_keypair) {
+        keypair_paths.push(replace_home_with_tilde(&hot_wallet_keypair));
+        seen_paths.insert(hot_wallet_keypair);
     }
 
     if keypair_paths.is_empty() {
@@ -262,6 +289,7 @@ fn remove_keypair() {
     let mut keypair_paths = Vec::new();
 
     let solana_default_keypair = expand_tilde("~/.config/solana/id.json");
+    let hot_wallet_keypair = expand_tilde("~/.config/solana/mining-hot-wallet.json");
 
     if config_path.exists() {
         let file = fs::File::open(&config_path).expect("  Failed to open configuration file.");
@@ -295,8 +323,8 @@ fn remove_keypair() {
         };
 
     // Check if the user is trying to remove the default keypair
-    if selection == replace_home_with_tilde(&solana_default_keypair) {
-        println!("  Removal of the default keypair (id.json) is not allowed.");
+    if selection == replace_home_with_tilde(&solana_default_keypair) || selection == replace_home_with_tilde(&hot_wallet_keypair) {
+        println!("  Removal of the default keypair (id.json) or mining-hot-wallet.json is not allowed.");
         return;
     }
 
@@ -316,6 +344,7 @@ fn remove_keypair() {
 
     println!("  Keypair path '{}' has been removed.", selection);
 }
+
 
 fn replace_home_with_tilde(path: &str) -> String {
     if let Some(home_dir) = home_dir() {
@@ -510,12 +539,12 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     let options = vec![
         "  Mine",
-        // "  ProtoMine (Experimental)",
         "  Sign up",
         "  Claim Rewards",
         "  View Balances",
         "  Stake",
         "  Unstake",
+        "  Generate Keypair",
         "  Exit",
     ];
 
@@ -548,6 +577,11 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some("  Exit") = selection {
         std::process::exit(0);
+    }
+
+    if let Some("  Generate Keypair") = selection {
+        generate_key().await;
+        return Ok(());
     }
 
     let base_url = if args.url == "ec1ipse.me" {
