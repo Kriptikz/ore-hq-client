@@ -1,6 +1,6 @@
 use base64::prelude::*;
 use clap::{arg, Parser};
-use drillx_2::{equix, Hash};
+use drillx_2::equix;
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};

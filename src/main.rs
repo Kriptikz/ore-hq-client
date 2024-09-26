@@ -207,13 +207,7 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
             .unwrap_or(false);
     
         if generate_new_keypair {
-            
-            tokio::task::block_in_place(|| {
-                futures::executor::block_on(async {
-                    generate_key().await;
-                });
-            });
-    
+            generate_key();
             println!("  Keypair generated successfully. Exiting program.");
         } else {
             println!("  Exiting program without generating a keypair.");
@@ -580,7 +574,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some("  Generate Keypair") = selection {
-        generate_key().await;
+        generate_key();
         return Ok(());
     }
 
@@ -652,7 +646,7 @@ async fn run_command(
             stake_balance::stake_balance(&key, base_url, unsecure_conn).await;
         }
         Some(Commands::GenerateKeypair) => {
-            generate_key::generate_key().await;
+            generate_key::generate_key();
         }
         None => {
             if let Some(choice) = selection {

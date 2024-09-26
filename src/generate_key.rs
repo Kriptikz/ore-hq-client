@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{io::Write, fs};
 
 use bip39::{Mnemonic, Seed};
 use dirs::home_dir;
@@ -9,11 +9,10 @@ use solana_sdk::{
     signature::{write_keypair_file, Keypair},
     signer::{SeedDerivable, Signer},
 };
-use tokio::fs;
 
 use crate::CONFIG_FILE;
 
-pub async fn generate_key() {
+pub fn generate_key() {
     let new_mnemonic = Mnemonic::new(bip39::MnemonicType::Words12, bip39::Language::English);
     let phrase = new_mnemonic.clone().into_phrase();
 
@@ -34,7 +33,7 @@ pub async fn generate_key() {
 
             if let Some(parent_dir) = key_dir.parent() {
                 if !parent_dir.exists() {
-                    match fs::create_dir_all(parent_dir).await {
+                    match fs::create_dir_all(parent_dir) {
                         Ok(_) => {}
                         Err(e) => {
                             println!("  Failed to create directory for wallet: {}", e);
