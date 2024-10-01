@@ -712,7 +712,7 @@ async fn run_command(
                         signup(base_url, key, unsecure_conn).await;
                     }
                     "  Claim Rewards" => {
-                        let args = ClaimArgs { amount: None, y: false };
+                        let args = ClaimArgs { amount: None, y: false, receiver_pubkey: None };
                         claim::claim(args, key, base_url, unsecure_conn).await;
                     }
                     "  View Balances" => {
