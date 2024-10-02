@@ -7,6 +7,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use solana_sdk::{signature::Keypair, signer::Signer};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::timeout;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use std::env;
 use std::mem::size_of;
@@ -184,6 +185,7 @@ pub struct ThreadSubmission {
 pub enum MessageSubmissionSystem {
     Submission(ThreadSubmission),
     Reset,
+    Finish,
 }
 
 #[derive(Debug, Parser)]
@@ -228,29 +230,35 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             "https".to_string()
         };
 
-        let timestamp = if let Ok(response) = client
-            .get(format!("{}://{}/timestamp", http_prefix, base_url))
-            .send()
-            .await
-        {
-            if let Ok(ts) = response.text().await {
-                if let Ok(ts) = ts.parse::<u64>() {
-                    ts
+        let timestamp = match client.get(format!("{}://{}/timestamp", http_prefix, base_url)).send().await {
+            Ok(res) => {
+                if res.status().as_u16() >= 200 && res.status().as_u16() < 300 {
+                    if let Ok(ts) = res.text().await {
+                        if let Ok(ts) = ts.parse::<u64>() {
+                            ts
+                        } else {
+                            println!("Server response body for /timestamp failed to parse, contact admin.");
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            continue;
+                        }
+                    } else {
+                        println!("Server response body for /timestamp is empty, contact admin.");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
                 } else {
-                    println!("Server response body for /timestamp failed to parse, contact admin.");
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    println!("Failed to get timestamp from server. StatusCode: {}", res.status());
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                     continue;
                 }
-            } else {
-                println!("Server response body for /timestamp is empty, contact admin.");
-                tokio::time::sleep(Duration::from_secs(3)).await;
-                continue;
+            },
+            Err(e) => {
+                println!("Failed to get timestamp from server.\nError: {}", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue
             }
-        } else {
-            println!("Server restarting, trying again in 3 seconds...");
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            continue;
         };
+
         println!("Server Timestamp: {}", timestamp);
 
         let ts_msg = timestamp.to_le_bytes();
@@ -284,13 +292,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 let (message_sender, mut message_receiver) =
                     tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
 
-                let receiver_thread = tokio::spawn(async move {
-                    while let Some(Ok(message)) = receiver.next().await {
-                        if process_message(message, message_sender.clone()).is_break() {
-                            break;
-                        }
-                    }
-                });
 
                 let (solution_system_message_sender, solution_system_message_receiver) =
                     tokio::sync::mpsc::unbounded_channel::<MessageSubmissionSystem>();
@@ -300,6 +301,53 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 let app_socket_sender = sender.clone();
                 tokio::spawn(async move {
                     submission_system(app_key, solution_system_message_receiver, app_socket_sender).await;
+                });
+
+                let solution_system_submission_sender = Arc::new(solution_system_message_sender);
+
+                let msend = message_sender.clone();
+                let system_submission_sender = solution_system_submission_sender.clone();
+                let receiver_thread = tokio::spawn(async move {
+                    let mut last_start_mine_instant = Instant::now();
+                    loop {
+                        match timeout(Duration::from_secs(45), receiver.next()).await {
+                            Ok(Some(Ok(message))) => {
+                                match process_message(message, msend.clone()) {
+                                    ControlFlow::Break(_) => {
+                                        break;
+                                    },
+                                    ControlFlow::Continue(got_start_mining) => {
+                                        if got_start_mining {
+                                            last_start_mine_instant = Instant::now();
+                                        }
+                                    }
+                                }
+
+                                if last_start_mine_instant.elapsed().as_secs() >= 120 {
+                                    eprintln!("Last start mining message was over 2 minutes ago. Closing websocket for reconnection.");
+                                    break;
+                                }
+                            },
+                            Ok(Some(Err(e))) => {
+                                eprintln!("Websocket error: {}", e);
+                                break;
+                            },
+                            Ok(None) => {
+                                eprintln!("Websocket closed gracefully");
+                                break;
+                            },
+                            Err(_) => {
+                                eprintln!("Websocket receiver timeout, assuming disconnection");
+                                break;
+                            }
+                        }
+                    }
+
+                    println!("Websocket receiver closed or timed out.");
+                    println!("Cleaning up channels...");
+                    let _ = system_submission_sender.send(MessageSubmissionSystem::Finish);
+                    drop(msend);
+                    drop(message_sender);
                 });
 
                 // send Ready message
@@ -321,10 +369,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 drop(lock);
 
                 // receive messages
+                let s_system_submission_sender = solution_system_submission_sender.clone();
                 while let Some(msg) = message_receiver.recv().await {
+                    let system_submission_sender = s_system_submission_sender.clone();
                     tokio::spawn({
                         let message_sender = sender.clone();
-                        let system_submission_sender = Arc::new(solution_system_message_sender.clone());
                         let key = key.clone();
                         let running = running.clone();
                         async move {
@@ -498,7 +547,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     bin_data.extend(sig);
                                     {
                                         let mut message_sender = message_sender.lock().await;
-                                        let _ = message_sender.send(Message::Binary(bin_data)).await;
+                                        if let Err(_) = message_sender.send(Message::Binary(bin_data)).await {
+                                            let _ = system_submission_sender.send(MessageSubmissionSystem::Finish);
+                                            println!("Failed to send Ready message. Returning...");
+                                            return
+                                        }
                                     }
                                 },
                                 ServerMessage::PoolSubmissionResult(data) => {
@@ -522,7 +575,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                     });
                 }
 
+                // If the websocket message receiver finishes, also finish the solution submission
+                // sender system
                 let _ = receiver_thread.await;
+                let _ = solution_system_submission_sender.send(MessageSubmissionSystem::Finish);
+                println!("Channels cleaned up, reconnecting...\n");
             }
             Err(e) => {
                 match e {
@@ -546,7 +603,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 fn process_message(
     msg: Message,
     message_channel: UnboundedSender<ServerMessage>,
-) -> ControlFlow<(), ()> {
+) -> ControlFlow<(), bool> {
+    let mut got_start_mining_message = false;
     match msg {
         Message::Text(t) => {
             println!("{}", t);
@@ -591,6 +649,7 @@ fn process_message(
                             ServerMessage::StartMining(hash_bytes, nonce_start..nonce_end, cutoff);
 
                         let _ = message_channel.send(msg);
+                        got_start_mining_message = true;
                     }
                 },
                 1 => {
@@ -611,7 +670,7 @@ fn process_message(
         _ => {}
     }
 
-    ControlFlow::Continue(())
+    ControlFlow::Continue(got_start_mining_message)
 }
 
 async fn submission_system(key: Arc<Keypair>, mut system_message_receiver: UnboundedReceiver<MessageSubmissionSystem>, socket_sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>) {
@@ -655,6 +714,9 @@ async fn submission_system(key: Arc<Keypair>, mut system_message_receiver: Unbou
 
                 // Sleep for 2 seconds to let the submission window open again
                 tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            MessageSubmissionSystem::Finish => {
+                return;
             }
         } 
     }
