@@ -5,8 +5,10 @@ use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use solana_sdk::{signature::Keypair, signer::Signer};
+use spl_token::amount_to_ui_amount;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::RwLock;
 use tokio::time::timeout;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use std::env;
@@ -25,6 +27,8 @@ use tokio_tungstenite::{
         Message,
     },
 };
+
+use crate::database::{AppDatabase, PoolSubmissionResult};
 
 #[derive(Debug)]
 pub struct ServerMessagePoolSubmissionResult {
@@ -368,10 +372,24 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 let _ = lock.send(Message::Binary(bin_data)).await;
                 drop(lock);
 
+                let (db_sender, mut db_receiver) =
+                    tokio::sync::mpsc::unbounded_channel::<PoolSubmissionResult>();
+
+                tokio::spawn(async move {
+                    let app_db = AppDatabase::new();
+
+                    while let Some(msg) = db_receiver.recv().await {
+                        app_db.add_new_pool_submission(msg);
+                        let total_earnings = amount_to_ui_amount(app_db.get_todays_earnings(), ore_api::consts::TOKEN_DECIMALS);
+                        println!("Todays Earnings: {} ORE\n", total_earnings);
+                    }
+                });
+
                 // receive messages
                 let s_system_submission_sender = solution_system_submission_sender.clone();
                 while let Some(msg) = message_receiver.recv().await {
                     let system_submission_sender = s_system_submission_sender.clone();
+                    let db_sender = db_sender.clone();
                     tokio::spawn({
                         let message_sender = sender.clone();
                         let key = key.clone();
@@ -555,6 +573,17 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     }
                                 },
                                 ServerMessage::PoolSubmissionResult(data) => {
+                                    let pool_earned = (data.total_rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+                                    let miner_earned = (data.miner_earned_rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+                                    let ps = PoolSubmissionResult::new(
+                                        data.difficulty,
+                                        pool_earned,
+                                        data.miner_percentage,
+                                        data.miner_supplied_difficulty,
+                                        miner_earned
+                                    );
+                                    let _ = db_sender.send(ps);
+
                                     let message = format!(
                                         "\n\nPool Submitted Difficulty: {}\nPool Earned:  {:.11} ORE\nPool Balance: {:.11} ORE\nTop Stake:    {:.11} ORE\nPool Multiplier: {:.2}x\n----------------------\nActive Miners: {}\n----------------------\nMiner Submitted Difficulty: {}\nMiner Earned: {:.11} ORE\n{:.2}% of total pool reward\n",
                                         data.difficulty,
@@ -568,7 +597,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                         data.miner_percentage
                                     );
                                     println!("{}", message);
-
                                 }
                             }
                         }

@@ -22,6 +22,8 @@ mod signup;
 mod stake_balance;
 mod undelegate_stake;
 mod generate_key;
+mod database;
+mod earnings;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -85,6 +87,8 @@ enum Commands {
     StakeBalance,
     #[command(about = "Generate a new solana keypair for mining.")]
     GenerateKeypair,
+    #[command(about = "Displays locally tracked earnings.")]
+    Earnings,
 }
 
 #[tokio::main]
@@ -647,6 +651,9 @@ async fn run_command(
         }
         Some(Commands::GenerateKeypair) => {
             generate_key::generate_key();
+        },
+        Some(Commands::Earnings) => {
+            earnings::earnings();
         }
         None => {
             if let Some(choice) = selection {
