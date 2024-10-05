@@ -5,7 +5,7 @@ use dirs::home_dir;
 use inquire::{Confirm, Select, Text};
 use mine::{mine, MineArgs};
 use protomine::{protomine, MineArgs as ProtoMineArgs};
-use signup::signup;
+use signup::{signup, SignupArgs};
 use solana_sdk::signature::read_keypair_file;
 use std::fs;
 use std::io::{self, BufRead, Write};
@@ -72,7 +72,7 @@ enum Commands {
     #[command(about = "Connect to pool and start mining using Prototype Software.")]
     Protomine(ProtoMineArgs),
     #[command(about = "Transfer SOL to the pool authority to sign up.")]
-    Signup,
+    Signup(SignupArgs),
     #[command(about = "Claim rewards.")]
     Claim(ClaimArgs),
     #[command(about = "Display current ore token balance.")]
@@ -627,8 +627,8 @@ async fn run_command(
         Some(Commands::Protomine(args)) => {
             protomine(args, key, base_url, unsecure_conn).await;
         }
-        Some(Commands::Signup) => {
-            signup(base_url, key, unsecure_conn).await;
+        Some(Commands::Signup(args)) => {
+            signup(args, base_url, key, unsecure_conn).await;
         }
         Some(Commands::Claim(args)) => {
             claim::claim(args, key, base_url, unsecure_conn).await;
@@ -709,7 +709,8 @@ async fn run_command(
                         protomine(args, key, base_url, unsecure_conn).await;
                     }
                     "  Sign up" => {
-                        signup(base_url, key, unsecure_conn).await;
+                        let args = SignupArgs { pubkey: None };
+                        signup(args, base_url, key, unsecure_conn).await;
                     }
                     "  Claim Rewards" => {
                         let args = ClaimArgs { amount: None, y: false, receiver_pubkey: None };

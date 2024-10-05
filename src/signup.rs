@@ -1,12 +1,38 @@
 use std::str::FromStr;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
+use clap::Parser;
 use solana_sdk::{
     pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction,
     transaction::Transaction,
 };
 
-pub async fn signup(url: String, key: Keypair, unsecure: bool) {
+#[derive(Debug, Parser)]
+pub struct SignupArgs {
+    #[arg(
+        long,
+        value_name = "PUBKEY",
+        default_value = None,
+        help = "Miner public key to enable."
+    )]
+    pub pubkey: Option<String>,
+}
+
+pub async fn signup(args: SignupArgs, url: String, key: Keypair, unsecure: bool) {
+    let miner_pubkey = if args.pubkey.is_some() {
+        match Pubkey::from_str(&args.pubkey.unwrap()) {
+            Ok(pk) => {
+                pk
+            },
+            Err(e) => {
+                println!("Invalid miner pubkey arg provided.");
+                return;
+            }
+        }
+    } else {
+            key.pubkey()
+    };
+
     let base_url = url;
 
     let client = reqwest::Client::new();
@@ -55,10 +81,11 @@ pub async fn signup(url: String, key: Keypair, unsecure: bool) {
 
     let resp = client
         .post(format!(
-            "{}://{}/signup?pubkey={}",
+            "{}://{}/v2/signup?miner={}&fee_payer={}",
             url_prefix,
             base_url,
-            key.pubkey().to_string()
+            miner_pubkey.to_string(),
+            key.pubkey().to_string(),
         ))
         .body(encoded_tx)
         .send()
