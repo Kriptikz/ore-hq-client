@@ -480,7 +480,9 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                                                         difficulty,
                                                                         d: hx.d,
                                                                 };
-                                                                let _ = system_submission_sender.send(MessageSubmissionSystem::Submission(thread_submission));
+                                                                if let Err(_) = system_submission_sender.send(MessageSubmissionSystem::Submission(thread_submission)) {
+                                                                        println!("Failed to send found hash to internal submission system");
+                                                                }
                                                                 best_nonce = nonce;
                                                                 best_difficulty = difficulty;
                                                                 best_hash = hx;
@@ -585,7 +587,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     let _ = db_sender.send(ps);
 
                                     let message = format!(
-                                        "\n\nPool Submitted Difficulty: {}\nPool Earned:  {:.11} ORE\nPool Balance: {:.11} ORE\nTop Stake:    {:.11} ORE\nPool Multiplier: {:.2}x\n----------------------\nActive Miners: {}\n----------------------\nMiner Submitted Difficulty: {}\nMiner Earned: {:.11} ORE\n{:.2}% of total pool reward\n",
+                                        "\n\nChallenge: {}\nPool Submitted Difficulty: {}\nPool Earned:  {:.11} ORE\nPool Balance: {:.11} ORE\nTop Stake:    {:.11} ORE\nPool Multiplier: {:.2}x\n----------------------\nActive Miners: {}\n----------------------\nMiner Submitted Difficulty: {}\nMiner Earned: {:.11} ORE\n{:.2}% of total pool reward\n",
+                                        BASE64_STANDARD.encode(data.challenge),
                                         data.difficulty,
                                         data.total_rewards,
                                         data.total_balance,
