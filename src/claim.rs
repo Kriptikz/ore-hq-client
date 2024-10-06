@@ -93,8 +93,8 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
 
     let rewards = rewards_response.parse::<f64>().unwrap_or(0.0);
 
-    println!("  Unclaimed Rewards: {:.11} ORE", rewards);
-    println!("  Wallet Balance:    {:.11} ORE", balance);
+    println!("  Miner Unclaimed Rewards:      {:.11} ORE", rewards);
+    println!("  Receiving Wallet Ore Balance: {:.11} ORE", balance);
 
     let minimum_claim_amount = 0.005;
     if rewards < minimum_claim_amount {

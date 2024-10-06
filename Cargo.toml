@@ -16,7 +16,7 @@ ore-api = "2.1.8"
 ore-utils = "2.1.8"
 drillx_2 = "1.0.0"
 futures-util = "0.3.30"
-reqwest = "^0.11.0"
+reqwest = { version = "^0.11.0", features = ["json", "rustls-tls"] }
 rpassword = "7.3.1"
 solana-sdk = "1.18.21"
 tokio = { version = "1.39.2", features = ["full"] }
@@ -36,6 +36,9 @@ ore-miner-delegation = { version = "0.4.0", features = ["no-entrypoint"] }
 tiny-bip39 = "0.8.2"
 qrcode = "0.14.1"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+semver = "1.0"
 
 [profile.release]
 opt-level = 3     # Full optimisations
