@@ -1,4 +1,4 @@
-use balance::balance;
+use balance::balance; 
 use claim::ClaimArgs;
 use clap::{Parser, Subcommand};
 use dirs::home_dir;
@@ -12,6 +12,11 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use core_affinity::get_core_ids;
 use generate_key::generate_key;
+use solana_sdk::pubkey::Pubkey;
+use std::str::FromStr;
+use semver::Version;
+use serde_json;
+use std::process::Command;
 
 mod balance;
 mod claim;
@@ -93,9 +98,10 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    let mut args = Args::parse();
+    let args = Args::parse();
 
     // Ensure the URL is set to the default if not provided
+    let mut args = args;
     if args.url.is_empty() {
         args.url = "ec1ipse.me".to_string();
     }
@@ -150,7 +156,6 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
             }
         };
         let reader = io::BufReader::new(file);
-
         let mut valid_keypair_paths = Vec::new();
 
         for line in reader.lines() {
@@ -219,8 +224,6 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
     
         std::process::exit(0);
     }
-    
-
     if default_keypair_exists && !seen_paths.contains(&solana_default_keypair) {
         keypair_paths.push(replace_home_with_tilde(&solana_default_keypair));
         seen_paths.insert(solana_default_keypair);
@@ -535,7 +538,20 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let version = env!("CARGO_PKG_VERSION");
 
-    let options = vec![
+    let update_available = match is_update_available().await {
+        Ok(true) => true,
+        Ok(false) => false,
+        Err(e) => {
+            println!("  Failed to check for updates: {}", e);
+            false
+        }
+    };
+
+    if update_available {
+        println!("  ** A new version of the client is available! **");
+    }
+
+    let mut options = vec![
         "  Mine",
         "  Sign up",
         "  Claim Rewards",
@@ -543,8 +559,18 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         "  Stake",
         "  Unstake",
         "  Generate Keypair",
+        "  Update Client",
         "  Exit",
     ];
+
+    if update_available {
+        for option in options.iter_mut() {
+            if option.trim() == "Update Client" {
+                *option = "  Update Client (Available)";
+                break;
+            }
+        }
+    }
 
     println!();
 
@@ -557,7 +583,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
             ),
             options,
         )
-        .with_page_size(9) // Set page size to 9 for the main menu
+        .with_page_size(9) // Adjusted page size after adding an option
         .with_vim_mode(vim_mode)
         .prompt()
         {
@@ -580,6 +606,15 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
     if let Some("  Generate Keypair") = selection {
         generate_key();
         return Ok(());
+    }
+
+    if let Some(option) = selection {
+        if option.starts_with("  Update Client") {
+            if let Err(e) = update_client().await {
+                println!("  Update failed: {}", e);
+            }
+            return Ok(());
+        }
     }
 
     let base_url = if args.url == "ec1ipse.me" {
@@ -651,7 +686,7 @@ async fn run_command(
         }
         Some(Commands::GenerateKeypair) => {
             generate_key::generate_key();
-        },
+        }
         Some(Commands::Earnings) => {
             earnings::earnings();
         }
@@ -716,15 +751,51 @@ async fn run_command(
                         protomine(args, key, base_url, unsecure_conn).await;
                     }
                     "  Sign up" => {
-                        let args = SignupArgs { pubkey: None };
-                        signup(args, base_url, key, unsecure_conn).await;
+                        // **Begin of Added Code**
+                        // Ask if the user wants to signup a different pubkey
+                        let use_different_pubkey = Confirm::new("  Would you like to sign up a different pubkey than your selected keypair's pubkey?")
+                            .with_default(false)
+                            .prompt()?;
+
+                        let signup_args = if use_different_pubkey {
+                            // Prompt for the alternate pubkey
+                            let alt_pubkey = loop {
+                                let input = Text::new("  Enter the miner public key to sign up:")
+                                    .prompt()?;
+                                match Pubkey::from_str(&input.trim()) {
+                                    Ok(pk) => break pk.to_string(),
+                                    Err(_) => {
+                                        println!("  Invalid public key format. Please try again.");
+                                        continue;
+                                    }
+                                }
+                            };
+                            SignupArgs { pubkey: Some(alt_pubkey) }
+                        } else {
+                            SignupArgs { pubkey: None }
+                        };
+                        // **End of Added Code**
+
+                        signup(signup_args, base_url, key, unsecure_conn).await;
                     }
                     "  Claim Rewards" => {
-                        let args = ClaimArgs { amount: None, y: false, receiver_pubkey: None };
+                        let use_separate_pubkey = Confirm::new("  Do you want to claim the rewards to a separate public key?")
+                            .with_default(false)
+                            .prompt()?;
+                        let receiver_pubkey = if use_separate_pubkey {
+                            let pubkey_input = Text::new("  Enter the receiver public key:")
+                                .prompt()?;
+                            Some(pubkey_input)
+                        } else {
+                            None
+                        };
+                        let args = ClaimArgs { amount: None, y: false, receiver_pubkey };
                         claim::claim(args, key, base_url, unsecure_conn).await;
                     }
                     "  View Balances" => {
-                        balance(&key, base_url, unsecure_conn).await;
+                        balance(&key, base_url.clone(), unsecure_conn).await;
+                        println!();
+                        earnings::earnings(); // Display earnings after balance
                     }
                     "  Stake" => {
                         balance(&key, base_url.clone(), unsecure_conn).await;
@@ -837,4 +908,66 @@ async fn run_command(
     }
 
     Ok(())
+}
+
+async fn is_update_available() -> Result<bool, Box<dyn std::error::Error>> {
+    let current_version = Version::parse(env!("CARGO_PKG_VERSION"))?;
+    let latest_version_str = get_latest_crate_version("ore-hq-client").await?;
+    let latest_version = Version::parse(&latest_version_str)?;
+
+    Ok(current_version < latest_version)
+}
+
+async fn update_client() -> Result<(), Box<dyn std::error::Error>> {
+    let current_version = Version::parse(env!("CARGO_PKG_VERSION"))?;
+    let latest_version_str = get_latest_crate_version("ore-hq-client").await?;
+    let latest_version = Version::parse(&latest_version_str)?;
+
+    if current_version < latest_version {
+        println!("  A new version ({}) is available.", latest_version);
+        let confirm_update = Confirm::new("  Would you like to update?")
+            .with_default(true)
+            .prompt()?;
+
+        if confirm_update {
+            println!("  Updating to version {}...", latest_version);
+            let status = Command::new("cargo")
+                .arg("install")
+                .arg("ore-hq-client")
+                .status()?;
+            if status.success() {
+                println!("  Update completed successfully.");
+                println!("  Please restart the application to use the updated version.");
+                std::process::exit(0);
+            } else {
+                println!("  Update failed.");
+            }
+        } else {
+            println!("  Update canceled.");
+        }
+    } else {
+        println!("  You are already running the latest version ({}).", current_version);
+    }
+    Ok(())
+}
+
+async fn get_latest_crate_version(crate_name: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "ore-hq-client")
+        .send()
+        .await?;
+        
+    if resp.status().is_success() {
+        let json: serde_json::Value = resp.json().await?;
+        if let Some(version) = json["crate"]["max_version"].as_str() {
+            Ok(version.to_string())
+        } else {
+            Err("Failed to parse version from response".into())
+        }
+    } else {
+        Err(format!("Failed to fetch crate info: {}", resp.status()).into())
+    }
 }
