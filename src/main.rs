@@ -751,8 +751,6 @@ async fn run_command(
                         protomine(args, key, base_url, unsecure_conn).await;
                     }
                     "  Sign up" => {
-                        // **Begin of Added Code**
-                        // Ask if the user wants to signup a different pubkey
                         let use_different_pubkey = Confirm::new("  Would you like to sign up a different pubkey than your selected keypair's pubkey?")
                             .with_default(false)
                             .prompt()?;
@@ -774,7 +772,6 @@ async fn run_command(
                         } else {
                             SignupArgs { pubkey: None }
                         };
-                        // **End of Added Code**
 
                         signup(signup_args, base_url, key, unsecure_conn).await;
                     }

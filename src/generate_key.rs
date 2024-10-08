@@ -74,7 +74,8 @@ pub fn generate_key() {
                     println!("  Mining Hot Wallet Secret Phrase (Use this to import/recover your mining hot wallet):");
                     println!("    {}", phrase);
                     println!("\n  New Mining Hot Wallet Public Key: {}", pubkey);
-                    println!("\n  The QR code above can be scanned with Phantom/Solflare wallet to fund this wallet for signup cost.");
+                    println!("\n  The QR code above can be scanned with Phantom/Solflare wallet to fund this wallet for any reason.");
+                    println!("\n  Note: Ec1ipse Pool does not require a sign up fee.");
                 }
                 Err(e) => {
                     println!("  Failed to write keypair to file: {}", e);
