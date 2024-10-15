@@ -1,6 +1,7 @@
 use balance::balance; 
 use claim::ClaimArgs;
 use clap::{Parser, Subcommand};
+use delegate_boost::delegate_boost;
 use dirs::home_dir;
 use inquire::{Confirm, Select, Text};
 use mine::{mine, MineArgs};
@@ -29,6 +30,7 @@ mod undelegate_stake;
 mod generate_key;
 mod database;
 mod earnings;
+mod delegate_boost;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -94,6 +96,8 @@ enum Commands {
     GenerateKeypair,
     #[command(about = "Displays locally tracked earnings.")]
     Earnings,
+    #[command(about = "Delegate boost for the pool miner.")]
+    DelegateBoost(delegate_boost::BoostArgs),
 }
 
 #[tokio::main]
@@ -689,6 +693,9 @@ async fn run_command(
         }
         Some(Commands::Earnings) => {
             earnings::earnings();
+        }
+        Some(Commands::DelegateBoost(args)) => {
+            delegate_boost::delegate_boost(args, key, base_url, unsecure_conn).await;
         }
         None => {
             if let Some(choice) = selection {
