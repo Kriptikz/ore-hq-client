@@ -1,4 +1,4 @@
-use balance::balance; 
+use balance::balance;
 use claim::ClaimArgs;
 use clap::{Parser, Subcommand};
 use dirs::home_dir;
@@ -29,6 +29,7 @@ mod undelegate_stake;
 mod generate_key;
 mod database;
 mod earnings;
+mod delegate_boost;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -94,6 +95,8 @@ enum Commands {
     GenerateKeypair,
     #[command(about = "Displays locally tracked earnings.")]
     Earnings,
+    #[command(about = "Access Boosts features.")]
+    Boosts,
 }
 
 #[tokio::main]
@@ -556,6 +559,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         "  Sign up",
         "  Claim Rewards",
         "  View Balances",
+        "  Boosts",
         "  Stake",
         "  Unstake",
         "  Generate Keypair",
@@ -583,7 +587,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
             ),
             options,
         )
-        .with_page_size(9) // Adjusted page size after adding an option
+        .with_page_size(10)
         .with_vim_mode(vim_mode)
         .prompt()
         {
@@ -690,6 +694,11 @@ async fn run_command(
         Some(Commands::Earnings) => {
             earnings::earnings();
         }
+        Some(Commands::Boosts) => {
+            if let Err(e) = delegate_boost::delegate_boost(&key, base_url.clone(), unsecure_conn).await {
+                println!("  An error occurred while executing Boosts: {}", e);
+            }
+        }
         None => {
             if let Some(choice) = selection {
                 match choice {
@@ -793,6 +802,11 @@ async fn run_command(
                         balance(&key, base_url.clone(), unsecure_conn).await;
                         println!();
                         earnings::earnings(); // Display earnings after balance
+                    }
+                    "  Boosts" => {
+                        if let Err(e) = delegate_boost::delegate_boost(&key, base_url.clone(), unsecure_conn).await {
+                            println!("  An error occurred while executing Boosts: {}", e);
+                        }
                     }
                     "  Stake" => {
                         balance(&key, base_url.clone(), unsecure_conn).await;
