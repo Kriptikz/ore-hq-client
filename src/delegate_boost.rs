@@ -242,9 +242,10 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
 
     let boost_amount_u64 =
         (boost_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
-    let ix = ore_miner_delegation::instruction::delegate_stake(
+    let ix = ore_miner_delegation::instruction::delegate_boost(
         key.pubkey(),
         pool_pubkey,
+        Pubkey::from_str(&args.mint).unwrap(),
         boost_amount_u64,
     );
 
