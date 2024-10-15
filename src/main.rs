@@ -1,6 +1,7 @@
 use balance::balance;
 use claim::ClaimArgs;
 use clap::{Parser, Subcommand};
+use delegate_boost::delegate_boost;
 use dirs::home_dir;
 use inquire::{Confirm, Select, Text};
 use mine::{mine, MineArgs};
@@ -95,8 +96,8 @@ enum Commands {
     GenerateKeypair,
     #[command(about = "Displays locally tracked earnings.")]
     Earnings,
-    #[command(about = "Access Boosts features.")]
-    Boosts,
+    #[command(about = "Delegate boost for the pool miner.")]
+    DelegateBoost(delegate_boost::BoostArgs),
 }
 
 #[tokio::main]
@@ -694,10 +695,8 @@ async fn run_command(
         Some(Commands::Earnings) => {
             earnings::earnings();
         }
-        Some(Commands::Boosts) => {
-            if let Err(e) = delegate_boost::delegate_boost(&key, base_url.clone(), unsecure_conn).await {
-                println!("  An error occurred while executing Boosts: {}", e);
-            }
+        Some(Commands::DelegateBoost(args)) => {
+            delegate_boost::delegate_boost(args, key, base_url, unsecure_conn).await;
         }
         None => {
             if let Some(choice) = selection {

@@ -76,6 +76,28 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     println!("  Staked Balance:    {:.11} ORE", staked_balance);
 }
 
+pub async fn get_token_balance(key: &Keypair, url: String, unsecure: bool, mint: String) -> f64 {
+    let client = reqwest::Client::new();
+    let url_prefix = if unsecure { "http" } else { "https" };
+
+    let balance_response = client
+        .get(format!(
+            "{}://{}/v2/miner/balance?pubkey={}&mint={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string(),
+            mint
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    balance_response.parse::<f64>().unwrap_or(0.0)
+}
+
 pub async fn get_balance(key: &Keypair, url: String, unsecure: bool) -> f64 {
     let client = reqwest::Client::new();
     let url_prefix = if unsecure { "http" } else { "https" };
