@@ -2,7 +2,6 @@ use balance::balance;
 use claim::ClaimArgs;
 use clap::{Parser, Subcommand};
 use core_affinity::get_core_ids;
-use delegate_boost::delegate_boost;
 use dirs::home_dir;
 use generate_key::generate_key;
 use inquire::{Confirm, Select, Text};
@@ -861,6 +860,15 @@ async fn run_command(
                             token_selection, token_balance
                         );
 
+                        // If the balance is 0, display a message and exit
+                        if token_balance == 0.0 {
+                            println!(
+                                "  You cannot stake because your {} balance is 0.",
+                                token_selection
+                            );
+                            std::process::exit(0);
+                        }
+
                         let amount: f64 = loop {
                             let prompt_message =
                                 format!("  Enter the amount of {} to stake:", token_selection);
@@ -909,20 +917,27 @@ async fn run_command(
                             .map(|(_, address)| address.to_string())
                             .expect("  Invalid token selection.");
 
-                        // Fetch and display the boosted balance for the selected token
-                        // TODO NOTE: THIS NEEDS TO BE UPDATED FOR BOOSTED BALANCE ENDPOINT
-
-                        let token_balance = balance::get_token_balance(
+                        let boosted_stake_balance = balance::get_boosted_stake_balance(
                             &key,
                             base_url.clone(),
                             unsecure_conn,
                             mint.clone(),
                         )
                         .await;
+
                         println!(
-                            "  Current boosted balance for {}: TODO: Add endpoint for current boosted balance.",
-                            token_selection,
+                            "  Current boosted stake balance for {}: {}",
+                            token_selection, boosted_stake_balance
                         );
+
+                        // If the boosted stake balance is 0, display a message and exit the program
+                        if boosted_stake_balance == 0.0 {
+                            println!(
+                                "  You cannot unstake because your {} boosted stake balance is 0.",
+                                token_selection
+                            );
+                            std::process::exit(0);
+                        }
 
                         let amount: f64 = loop {
                             let input = Text::new("  Enter the amount of boost to unstake:")
