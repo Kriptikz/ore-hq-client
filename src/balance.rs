@@ -1,4 +1,5 @@
 use solana_sdk::{signature::Keypair, signer::Signer};
+use std::collections::HashMap;
 
 pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     let base_url = url;
@@ -74,6 +75,18 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     println!("  Unclaimed Rewards: {:.11} ORE", rewards);
     println!("  Wallet (Stakable): {:.11} ORE", balance);
     println!("  Staked Balance:    {:.11} ORE", staked_balance);
+
+    let token_mints: HashMap<&str, &str> = HashMap::from([
+        ("oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp", "ORE Token"),
+        ("DrSS5RM7zUd9qjUEdDaf31vnDUSbCrMto6mjqTrHFifN", "ORE-SOL LP"),
+        ("meUwDp23AaxhiNKaQCyJ2EAF2T4oe1gSkEkGXSRVdZb", "ORE-ISC LP"),
+    ]);
+
+    for (mint, label) in token_mints.iter() {
+        let token_balance =
+            get_token_balance(key, base_url.clone(), unsecure, mint.to_string()).await;
+        println!("  {}: {}", label, token_balance);
+    }
 }
 
 pub async fn get_token_balance(key: &Keypair, url: String, unsecure: bool, mint: String) -> f64 {

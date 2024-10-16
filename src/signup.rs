@@ -1,9 +1,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use solana_sdk::{
-    pubkey::Pubkey, signature::Keypair, signer::Signer
-};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 #[derive(Debug, Parser)]
 pub struct SignupArgs {
@@ -19,16 +17,14 @@ pub struct SignupArgs {
 pub async fn signup(args: SignupArgs, url: String, key: Keypair, unsecure: bool) {
     let miner_pubkey = if args.pubkey.is_some() {
         match Pubkey::from_str(&args.pubkey.unwrap()) {
-            Ok(pk) => {
-                pk
-            },
+            Ok(pk) => pk,
             Err(_e) => {
                 println!("Invalid miner pubkey arg provided.");
                 return;
             }
         }
     } else {
-            key.pubkey()
+        key.pubkey()
     };
 
     let base_url = url;
@@ -40,7 +36,6 @@ pub async fn signup(args: SignupArgs, url: String, key: Keypair, unsecure: bool)
     } else {
         "https".to_string()
     };
-
 
     let resp = client
         .post(format!(

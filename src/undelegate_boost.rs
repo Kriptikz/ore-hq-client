@@ -8,19 +8,15 @@ use std::{str::FromStr, time::Duration};
 
 #[derive(Debug, Parser)]
 pub struct UnboostArgs {
-    #[arg(long, value_name = "AMOUNT", help = "Amount of boost to undelegate stake.")]
-    pub amount: f64,
-
-    #[arg(long, value_name = "MINT", help = "Mint of boost.")]
-    pub mint: String,
-
     #[arg(
         long,
-        short,
-        action,
-        help = "Auto stake input amount when staking window opens."
+        value_name = "AMOUNT",
+        help = "Amount of boost token to unstake."
     )]
-    pub auto: bool,
+    pub amount: f64,
+
+    #[arg(long, value_name = "MINT", help = "Mint address of the boost token.")]
+    pub mint: String,
 }
 
 pub async fn undelegate_boost(args: UnboostArgs, key: Keypair, url: String, unsecure: bool) {
