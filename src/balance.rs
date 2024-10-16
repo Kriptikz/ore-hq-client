@@ -79,11 +79,11 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     println!("  Staked Balance:    {:.11} ORE", staked_balance);
     println!();
 
-    let token_mints: HashMap<&str, &str> = HashMap::from([
+    let token_mints = vec![
         ("oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp", "ORE Token"),
         ("DrSS5RM7zUd9qjUEdDaf31vnDUSbCrMto6mjqTrHFifN", "ORE-SOL LP"),
         ("meUwDp23AaxhiNKaQCyJ2EAF2T4oe1gSkEkGXSRVdZb", "ORE-ISC LP"),
-    ]);
+    ];
 
     print!("In Wallet (Stakeable):\n");
     for (mint, label) in token_mints.iter() {
