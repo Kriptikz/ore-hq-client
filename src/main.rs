@@ -31,6 +31,7 @@ mod generate_key;
 mod database;
 mod earnings;
 mod delegate_boost;
+mod undelegate_boost;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -98,6 +99,8 @@ enum Commands {
     Earnings,
     #[command(about = "Delegate boost for the pool miner.")]
     DelegateBoost(delegate_boost::BoostArgs),
+    #[command(about = "Undelegate boost for the pool miner.")]
+    UndelegateBoost(undelegate_boost::UnboostArgs),
 }
 
 #[tokio::main]
@@ -696,6 +699,9 @@ async fn run_command(
         }
         Some(Commands::DelegateBoost(args)) => {
             delegate_boost::delegate_boost(args, key, base_url, unsecure_conn).await;
+        }
+        Some(Commands::UndelegateBoost(args)) => {
+            undelegate_boost::undelegate_boost(args, key, base_url, unsecure_conn).await;
         }
         None => {
             if let Some(choice) = selection {
