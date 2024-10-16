@@ -4,7 +4,9 @@ use inquire::{Select, Confirm};
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
-pub async fn delegate_boost(
+use crate::balance::{get_balance, get_token_balance};
+
+pub async fn delegate_boost_ui(
     key: &Keypair,
     base_url: String,
     unsecure_conn: bool,

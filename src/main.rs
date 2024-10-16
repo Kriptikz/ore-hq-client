@@ -31,6 +31,7 @@ mod generate_key;
 mod database;
 mod earnings;
 mod delegate_boost;
+mod delegate_boost_ui;
 mod undelegate_boost;
 
 const CONFIG_FILE: &str = "keypair_list";
@@ -809,9 +810,10 @@ async fn run_command(
                         earnings::earnings(); // Display earnings after balance
                     }
                     "  Boosts" => {
-                        if let Err(e) = delegate_boost::delegate_boost(&key, base_url.clone(), unsecure_conn).await {
-                            println!("  An error occurred while executing Boosts: {}", e);
-                        }
+                        // if let Err(e) = delegate_boost::delegate_boost(&key, base_url.clone(), unsecure_conn).await {
+                        //     println!("  An error occurred while executing Boosts: {}", e);
+                        // }
+                        println!("Work in progress!");
                     }
                     "  Stake" => {
                         balance(&key, base_url.clone(), unsecure_conn).await;
