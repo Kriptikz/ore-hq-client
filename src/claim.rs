@@ -21,12 +21,7 @@ pub struct ClaimArgs {
         help = "Amount of ore to claim. (Minimum of 0.005 ORE)"
     )]
     pub amount: Option<f64>,
-    #[arg(
-        long,
-        short,
-        action,
-        help = "Auto approve confirmations."
-    )]
+    #[arg(long, short, action, help = "Auto approve confirmations.")]
     pub y: bool,
 }
 
@@ -39,20 +34,14 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
     };
 
     let receiver_pubkey = match args.receiver_pubkey {
-        Some(rpk) => {
-            match Pubkey::from_str(&rpk) {
-                Ok(pk) => {
-                    pk
-                },
-                Err(_) => {
-                    println!("Failed to parse provided receiver pubkey.\nDouble check the provided public key is valid and try again.");
-                    return
-                }
+        Some(rpk) => match Pubkey::from_str(&rpk) {
+            Ok(pk) => pk,
+            Err(_) => {
+                println!("Failed to parse provided receiver pubkey.\nDouble check the provided public key is valid and try again.");
+                return;
             }
         },
-        None => {
-            key.pubkey()
-        }
+        None => key.pubkey(),
     };
 
     let balance_response = client
@@ -212,7 +201,7 @@ pub async fn claim(args: ClaimArgs, key: Keypair, url: String, unsecure: bool) {
         if let Ok(ts) = response.text().await {
             if let Ok(ts) = ts.parse::<u64>() {
                 ts
-            } else { 
+            } else {
                 println!("Failed to get timestamp from server, please try again.");
                 return;
             }

@@ -1,40 +1,44 @@
 use balance::balance;
 use claim::ClaimArgs;
 use clap::{Parser, Subcommand};
-use delegate_boost::delegate_boost;
+use core_affinity::get_core_ids;
 use dirs::home_dir;
+use generate_key::generate_key;
 use inquire::{Confirm, Select, Text};
 use mine::{mine, MineArgs};
 use protomine::{protomine, MineArgs as ProtoMineArgs};
+use semver::Version;
+use serde_json;
 use signup::{signup, SignupArgs};
+use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::read_keypair_file;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
-use core_affinity::get_core_ids;
-use generate_key::generate_key;
-use solana_sdk::pubkey::Pubkey;
-use std::str::FromStr;
-use semver::Version;
-use serde_json;
 use std::process::Command;
+use std::str::FromStr;
 
 mod balance;
 mod claim;
+mod database;
+mod delegate_boost;
 mod delegate_stake;
+mod earnings;
+mod generate_key;
 mod mine;
 mod protomine;
 mod signup;
 mod stake_balance;
-mod undelegate_stake;
-mod generate_key;
-mod database;
-mod earnings;
-mod delegate_boost;
-mod delegate_boost_ui;
 mod undelegate_boost;
+mod undelegate_stake;
 
 const CONFIG_FILE: &str = "keypair_list";
+
+const TOKEN_OPTIONS: &[(&str, &str)] = &[
+    ("ORE Token", "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp"),
+    ("ORE-SOL LP", "DrSS5RM7zUd9qjUEdDaf31vnDUSbCrMto6mjqTrHFifN"),
+    ("ORE-ISC LP", "meUwDp23AaxhiNKaQCyJ2EAF2T4oe1gSkEkGXSRVdZb"),
+];
 
 /// A command line interface tool for pooling power to submit hashes for proportional ORE rewards
 #[derive(Parser, Debug)]
@@ -64,12 +68,7 @@ struct Args {
     )]
     use_http: bool,
 
-    #[arg(
-        long,
-        short,
-        action,
-        help = "Use vim mode for menu navigation."
-    )]
+    #[arg(long, short, action, help = "Use vim mode for menu navigation.")]
     vim: bool,
 
     #[command(subcommand)]
@@ -216,20 +215,20 @@ fn get_keypair_path(default_keypair: &str) -> Option<String> {
 
     if !default_keypair_exists && !hot_wallet_exists && keypair_paths.is_empty() {
         println!("  No keypairs found and no id.json or mining-hot-wallet.json file exists.");
-    
+
         // Prompt the user if they want to generate a new keypair
         let generate_new_keypair = Confirm::new("  Would you like to generate a new keypair?")
             .with_default(true)
             .prompt()
             .unwrap_or(false);
-    
+
         if generate_new_keypair {
             generate_key();
             println!("  Keypair generated successfully. Exiting program.");
         } else {
             println!("  Exiting program without generating a keypair.");
         }
-    
+
         std::process::exit(0);
     }
     if default_keypair_exists && !seen_paths.contains(&solana_default_keypair) {
@@ -332,8 +331,12 @@ fn remove_keypair() {
         };
 
     // Check if the user is trying to remove the default keypair
-    if selection == replace_home_with_tilde(&solana_default_keypair) || selection == replace_home_with_tilde(&hot_wallet_keypair) {
-        println!("  Removal of the default keypair (id.json) or mining-hot-wallet.json is not allowed.");
+    if selection == replace_home_with_tilde(&solana_default_keypair)
+        || selection == replace_home_with_tilde(&hot_wallet_keypair)
+    {
+        println!(
+            "  Removal of the default keypair (id.json) or mining-hot-wallet.json is not allowed."
+        );
         return;
     }
 
@@ -353,7 +356,6 @@ fn remove_keypair() {
 
     println!("  Keypair path '{}' has been removed.", selection);
 }
-
 
 fn replace_home_with_tilde(path: &str) -> String {
     if let Some(home_dir) = home_dir() {
@@ -564,9 +566,10 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         "  Sign up",
         "  Claim Rewards",
         "  View Balances",
-        "  Boosts",
-        "  Stake",
-        "  Unstake",
+        "  Stake Boost",
+        "  Unstake Boost",
+        "  Stake (Legacy)",
+        "  Unstake (Legacy)",
         "  Generate Keypair",
         "  Update Client",
         "  Exit",
@@ -575,7 +578,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
     if update_available {
         for option in options.iter_mut() {
             if option.trim() == "Update Client" {
-                *option = "  Update Client (Available)";
+                *option = "  Update Client (* NEW *)";
                 break;
             }
         }
@@ -592,7 +595,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
             ),
             options,
         )
-        .with_page_size(10)
+        .with_page_size(12)
         .with_vim_mode(vim_mode)
         .prompt()
         {
@@ -715,13 +718,18 @@ async fn run_command(
                         // Ask for the number of threads
                         let threads: u32 = loop {
                             let input = Text::new(&format!(
-                                "  Enter the number of threads (default: {}):", max_threads
+                                "  Enter the number of threads (default: {}):",
+                                max_threads
                             ))
                             .with_default(&max_threads.to_string())
                             .prompt()?;
 
                             match input.trim().parse::<u32>() {
-                                Ok(valid_threads) if valid_threads > 0 && valid_threads <= max_threads as u32 => break valid_threads,
+                                Ok(valid_threads)
+                                    if valid_threads > 0 && valid_threads <= max_threads as u32 =>
+                                {
+                                    break valid_threads
+                                }
                                 _ => {
                                     println!("  Invalid thread count. Please enter a number between 1 and {}.", max_threads);
                                 }
@@ -730,14 +738,17 @@ async fn run_command(
 
                         // Ask for buffer time
                         let buffer: u32 = loop {
-                            let buffer_input = Text::new("  Enter the buffer time in seconds (optional):")
-                                .with_default("0")
-                                .prompt()?;
+                            let buffer_input =
+                                Text::new("  Enter the buffer time in seconds (optional):")
+                                    .with_default("0")
+                                    .prompt()?;
 
                             match buffer_input.trim().parse::<u32>() {
                                 Ok(valid_buffer) => break valid_buffer,
                                 _ => {
-                                    println!("  Invalid buffer input. Please enter a valid number.");
+                                    println!(
+                                        "  Invalid buffer input. Please enter a valid number."
+                                    );
                                 }
                             }
                         };
@@ -746,7 +757,7 @@ async fn run_command(
                         mine(args, key, base_url, unsecure_conn).await;
                     }
 
-                    "  ProtoMine" => {
+                    "  Protomine" => {
                         let threads: u32 = loop {
                             let input = Text::new("  Enter the number of threads:")
                                 .with_default("4")
@@ -783,7 +794,9 @@ async fn run_command(
                                     }
                                 }
                             };
-                            SignupArgs { pubkey: Some(alt_pubkey) }
+                            SignupArgs {
+                                pubkey: Some(alt_pubkey),
+                            }
                         } else {
                             SignupArgs { pubkey: None }
                         };
@@ -791,31 +804,165 @@ async fn run_command(
                         signup(signup_args, base_url, key, unsecure_conn).await;
                     }
                     "  Claim Rewards" => {
-                        let use_separate_pubkey = Confirm::new("  Do you want to claim the rewards to a separate public key?")
-                            .with_default(false)
-                            .prompt()?;
+                        let use_separate_pubkey = Confirm::new(
+                            "  Do you want to claim the rewards to a separate public key?",
+                        )
+                        .with_default(false)
+                        .prompt()?;
                         let receiver_pubkey = if use_separate_pubkey {
-                            let pubkey_input = Text::new("  Enter the receiver public key:")
-                                .prompt()?;
+                            let pubkey_input =
+                                Text::new("  Enter the receiver public key:").prompt()?;
                             Some(pubkey_input)
                         } else {
                             None
                         };
-                        let args = ClaimArgs { amount: None, y: false, receiver_pubkey };
+                        let args = ClaimArgs {
+                            amount: None,
+                            y: false,
+                            receiver_pubkey,
+                        };
                         claim::claim(args, key, base_url, unsecure_conn).await;
                     }
                     "  View Balances" => {
                         balance(&key, base_url.clone(), unsecure_conn).await;
                         println!();
-                        earnings::earnings(); // Display earnings after balance
+                        earnings::earnings();
                     }
-                    "  Boosts" => {
-                        // if let Err(e) = delegate_boost::delegate_boost(&key, base_url.clone(), unsecure_conn).await {
-                        //     println!("  An error occurred while executing Boosts: {}", e);
-                        // }
-                        println!("Work in progress!");
+                    "  Stake Boost" => {
+                        let token_selection = Select::new(
+                            "  Select the token to stake for boost:",
+                            TOKEN_OPTIONS
+                                .iter()
+                                .map(|(name, _)| *name)
+                                .collect::<Vec<&str>>(),
+                        )
+                        .prompt()
+                        .unwrap_or_else(|_| {
+                            println!("  Operation canceled.");
+                            std::process::exit(0);
+                        });
+
+                        let mint = TOKEN_OPTIONS
+                            .iter()
+                            .find(|(name, _)| *name == token_selection)
+                            .map(|(_, address)| address.to_string())
+                            .expect("  Invalid token selection.");
+
+                        let token_balance = balance::get_token_balance(
+                            &key,
+                            base_url.clone(),
+                            unsecure_conn,
+                            mint.clone(),
+                        )
+                        .await;
+                        println!(
+                            "  Current balance for {}: {}",
+                            token_selection, token_balance
+                        );
+
+                        // If the balance is 0, display a message and exit
+                        if token_balance == 0.0 {
+                            println!(
+                                "  You cannot stake because your {} balance is 0.",
+                                token_selection
+                            );
+                            std::process::exit(0);
+                        }
+
+                        let amount: f64 = loop {
+                            let prompt_message =
+                                format!("  Enter the amount of {} to stake:", token_selection);
+                            let input = Text::new(&prompt_message).prompt().unwrap_or_else(|_| {
+                                println!("  Operation canceled.");
+                                std::process::exit(0);
+                            });
+
+                            match input.trim().parse::<f64>() {
+                                Ok(a) if a > 0.0 => break a,
+                                _ => println!("  Please enter a valid amount greater than 0."),
+                            }
+                        };
+
+                        let auto = Confirm::new("  Enable auto staking?")
+                            .with_default(true)
+                            .prompt()
+                            .unwrap_or(true);
+
+                        let boost_args = delegate_boost::BoostArgs { amount, mint, auto };
+                        delegate_boost::delegate_boost(
+                            boost_args,
+                            key,
+                            base_url.clone(),
+                            unsecure_conn,
+                        )
+                        .await;
                     }
-                    "  Stake" => {
+                    "  Unstake Boost" => {
+                        let token_selection = Select::new(
+                            "  Select the boost token to unstake:",
+                            TOKEN_OPTIONS
+                                .iter()
+                                .map(|(name, _)| *name)
+                                .collect::<Vec<&str>>(),
+                        )
+                        .prompt()
+                        .unwrap_or_else(|_| {
+                            println!("  Operation canceled.");
+                            std::process::exit(0);
+                        });
+
+                        let mint = TOKEN_OPTIONS
+                            .iter()
+                            .find(|(name, _)| *name == token_selection)
+                            .map(|(_, address)| address.to_string())
+                            .expect("  Invalid token selection.");
+
+                        let boosted_stake_balance = balance::get_boosted_stake_balance(
+                            &key,
+                            base_url.clone(),
+                            unsecure_conn,
+                            mint.clone(),
+                        )
+                        .await;
+
+                        println!(
+                            "  Current boosted stake balance for {}: {}",
+                            token_selection, boosted_stake_balance
+                        );
+
+                        // If the boosted stake balance is 0, display a message and exit the program
+                        if boosted_stake_balance == 0.0 {
+                            println!(
+                                "  You cannot unstake because your {} boosted stake balance is 0.",
+                                token_selection
+                            );
+                            std::process::exit(0);
+                        }
+
+                        let amount: f64 = loop {
+                            let input = Text::new("  Enter the amount of boost to unstake:")
+                                .prompt()
+                                .unwrap_or_else(|_| {
+                                    println!("  Operation canceled.");
+                                    std::process::exit(0);
+                                });
+
+                            match input.trim().parse::<f64>() {
+                                Ok(a) if a > 0.0 => break a,
+                                _ => println!("  Please enter a valid amount greater than 0."),
+                            }
+                        };
+
+                        let unboost_args = undelegate_boost::UnboostArgs { amount, mint };
+                        undelegate_boost::undelegate_boost(
+                            unboost_args,
+                            key,
+                            base_url.clone(),
+                            unsecure_conn,
+                        )
+                        .await;
+                    }
+                    "  Stake (Legacy)" => {
                         balance(&key, base_url.clone(), unsecure_conn).await;
 
                         loop {
@@ -836,7 +983,7 @@ async fn run_command(
                                         Ok(stake_amount) if stake_amount > 0.0 => {
                                             let args = delegate_stake::StakeArgs {
                                                 amount: stake_amount,
-                                                auto: true, // Auto-staking by default
+                                                auto: true,
                                             };
                                             delegate_stake::delegate_stake(
                                                 args,
@@ -868,7 +1015,7 @@ async fn run_command(
                         }
                     }
 
-                    "  Unstake" => {
+                    "  Unstake (Legacy)" => {
                         stake_balance::stake_balance(&key, base_url.clone(), unsecure_conn).await;
 
                         loop {
@@ -964,7 +1111,10 @@ async fn update_client() -> Result<(), Box<dyn std::error::Error>> {
             println!("  Update canceled.");
         }
     } else {
-        println!("  You are already running the latest version ({}).", current_version);
+        println!(
+            "  You are already running the latest version ({}).",
+            current_version
+        );
     }
     Ok(())
 }
@@ -977,7 +1127,7 @@ async fn get_latest_crate_version(crate_name: &str) -> Result<String, Box<dyn st
         .header("User-Agent", "ore-hq-client")
         .send()
         .await?;
-        
+
     if resp.status().is_success() {
         let json: serde_json::Value = resp.json().await?;
         if let Some(version) = json["crate"]["max_version"].as_str() {

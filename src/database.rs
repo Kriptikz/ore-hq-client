@@ -32,8 +32,8 @@ impl PoolSubmissionResult {
     }
 }
 
-pub struct AppDatabase{
-    connection: RwLock<Connection>
+pub struct AppDatabase {
+    connection: RwLock<Connection>,
 }
 
 impl AppDatabase {
@@ -50,17 +50,15 @@ impl AppDatabase {
                         miner_earned INTEGER NOT NULL,
                         created_at  INTEGER DEFAULT CURRENT_TIMESTAMP NOT NULL
                     )"#,
-                    ()
+                    (),
                 ) {
-                    Ok(_) => {
-                        c
-                    },
+                    Ok(_) => c,
                     Err(e) => {
                         eprintln!("Error creating pool_submission_results table!");
                         panic!("Error: {e}");
                     }
                 }
-            },
+            }
             Err(_e) => {
                 panic!("Failed to open app database");
             }
@@ -85,7 +83,7 @@ impl AppDatabase {
                 &new_pool_submission_result.miner_percentage,
                 &new_pool_submission_result.miner_difficulty,
                 &new_pool_submission_result.miner_earned,
-            )
+            ),
         ) {
             eprintln!("Error: Failed to insert pool submission result.\nE: {e}");
         }
@@ -96,25 +94,20 @@ impl AppDatabase {
             r#"SELECT SUM(miner_earned) as total_earned
                FROM pool_submission_results
                WHERE created_at >= date('now', 'start of day')
-            "#
+            "#,
         ) {
             Ok(mut stmt) => {
                 let total_earned: Option<u64> = stmt.query_row([], |row| row.get(0)).unwrap();
                 match total_earned {
-                    Some(sum) => {
-                        return sum
-                    },
-                    None => {
-                        return 0
-                    }
+                    Some(sum) => return sum,
+                    None => return 0,
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("Error: Failed to get todays earnings.\nE: {e}");
-                return 0
+                return 0;
             }
         }
-
     }
 
     pub fn get_daily_earnings(&self, days: u32) -> Vec<(String, u64)> {
@@ -124,32 +117,34 @@ impl AppDatabase {
                WHERE created_at >= date('now', '-6 days')
                GROUP BY DATE(created_at)
                ORDER BY DATE(created_at)
-            "#
+            "#,
         ) {
             Ok(mut stmt) => {
-                let earnings_iter = stmt.query_map([], |row| {
+                let earnings_iter = stmt
+                    .query_map([], |row| {
                         let day: String = row.get(0).unwrap();
                         let total_earned: u64 = row.get(1).unwrap();
                         Ok((day, total_earned))
-                }).unwrap();
+                    })
+                    .unwrap();
 
                 let mut earnings = vec![];
                 for earning in earnings_iter {
                     match earning {
                         Ok((day, total_earned)) => {
                             earnings.push((day, total_earned));
-                        },
+                        }
                         Err(_) => {
                             eprintln!("Error getting earning");
                         }
                     }
                 }
 
-                return earnings
-            },
+                return earnings;
+            }
             Err(e) => {
                 eprintln!("Error: Failed to get todays earnings.\nE: {e}");
-                return vec![]
+                return vec![];
             }
         }
     }

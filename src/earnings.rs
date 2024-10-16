@@ -8,6 +8,10 @@ pub fn earnings() {
     let daily_earnings = app_db.get_daily_earnings(7);
 
     for de in daily_earnings {
-        println!("Day: {}, Total Earned: {} ORE", de.0, amount_to_ui_amount(de.1, ore_api::consts::TOKEN_DECIMALS));
+        println!(
+            "Day: {}, Total Earned: {} ORE",
+            de.0,
+            amount_to_ui_amount(de.1, ore_api::consts::TOKEN_DECIMALS)
+        );
     }
 }

@@ -6,11 +6,6 @@ use futures_util::{SinkExt, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use solana_sdk::{signature::Keypair, signer::Signer};
 use spl_token::amount_to_ui_amount;
-use tokio::net::TcpStream;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::RwLock;
-use tokio::time::timeout;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use std::env;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,7 +14,10 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
+use tokio::time::timeout;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{
@@ -27,6 +25,7 @@ use tokio_tungstenite::{
         Message,
     },
 };
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::database::{AppDatabase, PoolSubmissionResult};
 
@@ -42,7 +41,7 @@ pub struct ServerMessagePoolSubmissionResult {
     best_nonce: u64,
     miner_supplied_difficulty: u32,
     miner_earned_rewards: f64,
-    miner_percentage: f64
+    miner_percentage: f64,
 }
 
 impl ServerMessagePoolSubmissionResult {
@@ -148,7 +147,7 @@ impl ServerMessagePoolSubmissionResult {
             best_nonce,
             miner_supplied_difficulty,
             miner_earned_rewards,
-            miner_percentage
+            miner_percentage,
         }
     }
 
@@ -170,7 +169,6 @@ impl ServerMessagePoolSubmissionResult {
         bin_data
     }
 }
-
 
 #[derive(Debug)]
 pub enum ServerMessage {
@@ -234,7 +232,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             "https".to_string()
         };
 
-        let timestamp = match client.get(format!("{}://{}/timestamp", http_prefix, base_url)).send().await {
+        let timestamp = match client
+            .get(format!("{}://{}/timestamp", http_prefix, base_url))
+            .send()
+            .await
+        {
             Ok(res) => {
                 if res.status().as_u16() >= 200 && res.status().as_u16() < 300 {
                     if let Ok(ts) = res.text().await {
@@ -251,15 +253,18 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                         continue;
                     }
                 } else {
-                    println!("Failed to get timestamp from server. StatusCode: {}", res.status());
+                    println!(
+                        "Failed to get timestamp from server. StatusCode: {}",
+                        res.status()
+                    );
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     continue;
                 }
-            },
+            }
             Err(e) => {
                 println!("Failed to get timestamp from server.\nError: {}", e);
                 tokio::time::sleep(Duration::from_secs(5)).await;
-                continue
+                continue;
             }
         };
 
@@ -296,7 +301,6 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 let (message_sender, mut message_receiver) =
                     tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
 
-
                 let (solution_system_message_sender, solution_system_message_receiver) =
                     tokio::sync::mpsc::unbounded_channel::<MessageSubmissionSystem>();
 
@@ -304,7 +308,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                 let app_key = key.clone();
                 let app_socket_sender = sender.clone();
                 tokio::spawn(async move {
-                    submission_system(app_key, solution_system_message_receiver, app_socket_sender).await;
+                    submission_system(app_key, solution_system_message_receiver, app_socket_sender)
+                        .await;
                 });
 
                 let solution_system_submission_sender = Arc::new(solution_system_message_sender);
@@ -319,7 +324,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                 match process_message(message, msend.clone()) {
                                     ControlFlow::Break(_) => {
                                         break;
-                                    },
+                                    }
                                     ControlFlow::Continue(got_start_mining) => {
                                         if got_start_mining {
                                             last_start_mine_instant = Instant::now();
@@ -331,15 +336,15 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     eprintln!("Last start mining message was over 2 minutes ago. Closing websocket for reconnection.");
                                     break;
                                 }
-                            },
+                            }
                             Ok(Some(Err(e))) => {
                                 eprintln!("Websocket error: {}", e);
                                 break;
-                            },
+                            }
                             Ok(None) => {
                                 eprintln!("Websocket closed gracefully");
                                 break;
-                            },
+                            }
                             Err(_) => {
                                 eprintln!("Websocket receiver timeout, assuming disconnection");
                                 break;
@@ -380,7 +385,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                     while let Some(msg) = db_receiver.recv().await {
                         app_db.add_new_pool_submission(msg);
-                        let total_earnings = amount_to_ui_amount(app_db.get_todays_earnings(), ore_api::consts::TOKEN_DECIMALS);
+                        let total_earnings = amount_to_ui_amount(
+                            app_db.get_todays_earnings(),
+                            ore_api::consts::TOKEN_DECIMALS,
+                        );
                         println!("Todays Earnings: {} ORE\n", total_earnings);
                     }
                 });
@@ -401,8 +409,14 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                             match msg {
                                 ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
-                                    println!("\nNext Challenge: {}", BASE64_STANDARD.encode(challenge));
-                                    println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
+                                    println!(
+                                        "\nNext Challenge: {}",
+                                        BASE64_STANDARD.encode(challenge)
+                                    );
+                                    println!(
+                                        "Nonce range: {} - {}",
+                                        nonce_range.start, nonce_range.end
+                                    );
                                     println!("Cutoff in: {}s", cutoff);
 
                                     // Adjust the cutoff with the buffer
@@ -423,7 +437,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                         ProgressBar::new_spinner().with_style(
                                             ProgressStyle::default_spinner()
                                                 .tick_strings(&[
-                                                    "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+                                                    "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇",
+                                                    "⠏",
                                                 ])
                                                 .template("{spinner:.red} {msg}")
                                                 .expect("Failed to set progress bar template"),
@@ -522,8 +537,12 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     let mut best_difficulty = 0;
                                     let mut total_nonces_checked = 0;
                                     for h in handles {
-                                        if let Ok(Some((_nonce, difficulty, _hash, nonces_checked))) =
-                                            h.join()
+                                        if let Ok(Some((
+                                            _nonce,
+                                            difficulty,
+                                            _hash,
+                                            nonces_checked,
+                                        ))) = h.join()
                                         {
                                             total_nonces_checked += nonces_checked;
                                             if difficulty > best_difficulty {
@@ -548,7 +567,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                         println!("Client found diff: {}", best_difficulty);
                                     }
 
-                                    let _ = system_submission_sender.send(MessageSubmissionSystem::Reset);
+                                    let _ = system_submission_sender
+                                        .send(MessageSubmissionSystem::Reset);
 
                                     //tokio::time::sleep(Duration::from_secs(5 + args.buffer as u64)).await;
 
@@ -559,7 +579,8 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                         .as_secs();
 
                                     let msg = now.to_le_bytes();
-                                    let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
+                                    let sig =
+                                        key.sign_message(&msg).to_string().as_bytes().to_vec();
                                     let mut bin_data: Vec<u8> = Vec::new();
                                     bin_data.push(0u8);
                                     bin_data.extend_from_slice(&key.pubkey().to_bytes());
@@ -567,22 +588,29 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     bin_data.extend(sig);
                                     {
                                         let mut message_sender = message_sender.lock().await;
-                                        if let Err(_) = message_sender.send(Message::Binary(bin_data)).await {
-                                            let _ = system_submission_sender.send(MessageSubmissionSystem::Finish);
+                                        if let Err(_) =
+                                            message_sender.send(Message::Binary(bin_data)).await
+                                        {
+                                            let _ = system_submission_sender
+                                                .send(MessageSubmissionSystem::Finish);
                                             println!("Failed to send Ready message. Returning...");
-                                            return
+                                            return;
                                         }
                                     }
-                                },
+                                }
                                 ServerMessage::PoolSubmissionResult(data) => {
-                                    let pool_earned = (data.total_rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
-                                    let miner_earned = (data.miner_earned_rewards * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
+                                    let pool_earned = (data.total_rewards
+                                        * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64))
+                                        as u64;
+                                    let miner_earned = (data.miner_earned_rewards
+                                        * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64))
+                                        as u64;
                                     let ps = PoolSubmissionResult::new(
                                         data.difficulty,
                                         pool_earned,
                                         data.miner_percentage,
                                         data.miner_supplied_difficulty,
-                                        miner_earned
+                                        miner_earned,
                                     );
                                     let _ = db_sender.send(ps);
 
@@ -682,9 +710,11 @@ fn process_message(
                         let _ = message_channel.send(msg);
                         got_start_mining_message = true;
                     }
-                },
+                }
                 1 => {
-                    let msg = ServerMessage::PoolSubmissionResult(ServerMessagePoolSubmissionResult::new_from_bytes(b));
+                    let msg = ServerMessage::PoolSubmissionResult(
+                        ServerMessagePoolSubmissionResult::new_from_bytes(b),
+                    );
                     let _ = message_channel.send(msg);
                 }
                 _ => {
@@ -704,7 +734,11 @@ fn process_message(
     ControlFlow::Continue(got_start_mining_message)
 }
 
-async fn submission_system(key: Arc<Keypair>, mut system_message_receiver: UnboundedReceiver<MessageSubmissionSystem>, socket_sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>) {
+async fn submission_system(
+    key: Arc<Keypair>,
+    mut system_message_receiver: UnboundedReceiver<MessageSubmissionSystem>,
+    socket_sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
+) {
     let mut best_diff = 0;
     while let Some(msg) = system_message_receiver.recv().await {
         match msg {
@@ -749,7 +783,6 @@ async fn submission_system(key: Arc<Keypair>, mut system_message_receiver: Unbou
             MessageSubmissionSystem::Finish => {
                 return;
             }
-        } 
+        }
     }
-
 }
