@@ -62,7 +62,7 @@ pub async fn minepmc(args: MineArgs, passedkey: Keypair, url: String, unsecure: 
 	let overmine_by_ms: u64 = overmine_by_ms_str.parse().unwrap_or(4200);
 	println!("        Setting overmine_by_ms duration to {}{}", overmine_by_ms.to_string().blue(), ms_dimmed);
 
-	// NONCE_INIT_INTERVAL: This value is used to in the calculation to guestimate how long your miner takes to do a hash.
+	// NONCE_INIT_INTERVAL: This value is used in the calculation to guestimate how long your miner takes to do a hash.
 	// It is used to tune how accurate you can end your mining time to a precise time
 	// A higher interval is better (~1% of your processed count)
 	// Aim for an accuracy of <50ms on average
