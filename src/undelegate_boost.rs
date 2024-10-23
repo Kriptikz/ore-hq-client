@@ -142,7 +142,7 @@ pub async fn undelegate_boost(args: UnboostArgs, key: Keypair, url: String, unse
 }
 
 // Helper function to fetch server timestamp
-async fn get_timestamp(client: &reqwest::Client, url_prefix: &str, base_url: &str) -> u64 {
+async fn _get_timestamp(client: &reqwest::Client, url_prefix: &str, base_url: &str) -> u64 {
     loop {
         if let Ok(response) = client
             .get(format!("{}://{}/timestamp", url_prefix, base_url))
