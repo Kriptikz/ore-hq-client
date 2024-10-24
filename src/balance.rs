@@ -95,7 +95,7 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     println!("Boosted:");
     for (mint, label) in token_mints.iter() {
         let boosted_token_balance =
-            get_boosted_stake_balance(key, base_url.clone(), unsecure, mint.to_string()).await;
+            get_boosted_stake_balance_v2(key, base_url.clone(), unsecure, mint.to_string()).await;
         println!("  {}: {}", label, boosted_token_balance);
     }
 }
