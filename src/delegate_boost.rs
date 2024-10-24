@@ -193,7 +193,7 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
                         tokio::time::sleep(Duration::from_secs(3)).await;
                     }
                 } else {
-                    println!("  Staking window opens in {} minutes.", (600 - secs_passed_hour) / 60);
+                    println!("  Staking window opens in {} minutes {} seconds.", (600 - secs_passed_hour) / 60, secs_passed_hour % 60);
                     println!("  You can let this run until it is complete.");
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
