@@ -82,7 +82,7 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
         // Non-auto staking logic
         let timestamp = get_timestamp(&client, &url_prefix, &base_url).await;
         println!("  Server Timestamp: {}", timestamp);
-        if let Some(secs_passed_hour) = timestamp.checked_rem(3600) {
+        if let Some(secs_passed_hour) = timestamp.checked_rem(600) {
             println!("  SECS PASSED HOUR: {}", secs_passed_hour);
             if secs_passed_hour < 300 {
                 println!("  Staking window opened. Staking...");
@@ -99,7 +99,7 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
         loop {
             let timestamp = get_timestamp(&client, &url_prefix, &base_url).await;
             println!("  Server Timestamp: {}", timestamp);
-            if let Some(secs_passed_hour) = timestamp.checked_rem(3600) {
+            if let Some(secs_passed_hour) = timestamp.checked_rem(600) {
                 if secs_passed_hour < 300 {
                     println!("  Staking window opened. Staking...");
 
@@ -146,7 +146,7 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
                         let boost_amount_u64 = (boost_amount
                             * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64))
                             as u64;
-                        let ix = ore_miner_delegation::instruction::delegate_boost(
+                        let ix = ore_miner_delegation::instruction::delegate_boost_v2(
                             key.pubkey(),
                             pool_pubkey,
                             Pubkey::from_str(&args.mint).unwrap(),
@@ -160,7 +160,7 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
 
                         let resp = client
                             .post(format!(
-                                "{}://{}/stake-boost?pubkey={}&mint={}&amount={}",
+                                "{}://{}/v2/stake-boost?pubkey={}&mint={}&amount={}",
                                 url_prefix,
                                 base_url,
                                 key.pubkey().to_string(),
@@ -193,11 +193,12 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
                         tokio::time::sleep(Duration::from_secs(3)).await;
                     }
                 } else {
-                    println!("  Waiting for staking window to open... You can let this run until it is complete.");
+                    println!("  Staking window opens in {} minutes.", (600 - secs_passed_hour) / 60);
+                    println!("  You can let this run until it is complete.");
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
             } else {
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                tokio::time::sleep(Duration::from_secs(120)).await;
             }
         }
     }
@@ -242,7 +243,7 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
 
     let boost_amount_u64 =
         (boost_amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
-    let ix = ore_miner_delegation::instruction::delegate_boost(
+    let ix = ore_miner_delegation::instruction::delegate_boost_v2(
         key.pubkey(),
         pool_pubkey,
         Pubkey::from_str(&args.mint).unwrap(),
@@ -256,7 +257,7 @@ pub async fn delegate_boost(args: BoostArgs, key: Keypair, url: String, unsecure
 
     let resp = client
         .post(format!(
-            "{}://{}/stake-boost?pubkey={}&mint={}&amount={}",
+            "{}://{}/v2/stake-boost?pubkey={}&mint={}&amount={}",
             url_prefix,
             base_url,
             key.pubkey().to_string(),

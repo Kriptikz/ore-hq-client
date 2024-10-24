@@ -169,3 +169,30 @@ pub async fn get_boosted_stake_balance(
 
     balance_response.parse::<f64>().unwrap_or(0.0)
 }
+
+pub async fn get_boosted_stake_balance_v2(
+    key: &Keypair,
+    url: String,
+    unsecure: bool,
+    mint: String,
+) -> f64 {
+    let client = reqwest::Client::new();
+    let url_prefix = if unsecure { "http" } else { "https" };
+
+    let balance_response = client
+        .get(format!(
+            "{}://{}/v2/miner/boost/stake?pubkey={}&mint={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string(),
+            mint
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    balance_response.parse::<f64>().unwrap_or(0.0)
+}

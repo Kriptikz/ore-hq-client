@@ -975,7 +975,7 @@ async fn run_command(
                             .map(|(_, address)| address.to_string())
                             .expect("  Invalid token selection.");
 
-                        let boosted_stake_balance = balance::get_boosted_stake_balance(
+                        let boosted_stake_balance = balance::get_boosted_stake_balance_v2(
                             &key,
                             base_url.clone(),
                             unsecure_conn,
