@@ -47,7 +47,7 @@ struct MiningResult {
     nonce: u64,
     difficulty: u32,
     hash: drillx_2::Hash,
-    nonces_checked: u64,
+    _nonces_checked: u64,
 }
 
 impl MiningResult {
@@ -56,7 +56,7 @@ impl MiningResult {
             nonce: 0,
             difficulty: 0,
             hash: drillx_2::Hash::default(),
-            nonces_checked: 0,
+			_nonces_checked: 0,
         }
     }
 }
@@ -128,7 +128,7 @@ fn optimized_mining_rayon(
                                 nonce,
                                 difficulty,
                                 hash: hx,
-                                nonces_checked: local_nonces_checked,
+                                _nonces_checked: local_nonces_checked,
                             };
                         }
                     }

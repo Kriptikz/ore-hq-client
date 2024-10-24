@@ -1,17 +1,16 @@
-use colored::*;
 use base64::prelude::*;
-use clap::{arg, Parser};
 use drillx_2::equix;
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
+use http::Method;
+use http::header::{SEC_WEBSOCKET_KEY, HOST, SEC_WEBSOCKET_VERSION, AUTHORIZATION, UPGRADE, CONNECTION};
 use indicatif::{ProgressBar, ProgressStyle};
 use solana_sdk::{signature::Keypair, signer::Signer};
 use spl_token::amount_to_ui_amount;
 use std::env;
-use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
-    ops::{ControlFlow, Range},
+    ops::ControlFlow,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -20,7 +19,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio::time::timeout;
 use tokio_tungstenite::{
-    connect_async,
+    connect_async_with_config,
     tungstenite::{
         handshake::client::{generate_key, Request},
         Message,
@@ -28,190 +27,54 @@ use tokio_tungstenite::{
 };
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+use colored::*;
+use chrono::prelude::*;
+use std::cell::UnsafeCell;
+use std::sync::atomic::{AtomicU32, AtomicU64};
+
 use crate::database::{AppDatabase, PoolSubmissionResult};
+use crate::mine::{
+	MineArgs,
+	ServerMessagePoolSubmissionResult, 
+	ServerMessage,
+	MessageSubmissionSystem,
+	ThreadSubmission,
+};
+use crate::stats::{
+	get_elapsed_string, get_miner_accuracy, record_miner_accuracy,
+	set_no_more_submissions, is_transaction_in_progress, record_tx_started, record_tx_complete,
+	get_global_pass_start_time, set_global_pass_start_time,
+};
 
-#[derive(Debug)]
-pub struct ServerMessagePoolSubmissionResult {
-    pub difficulty: u32,
-    pub total_balance: f64,
-    pub total_rewards: f64,
-    pub top_stake: f64,
-	pub  multiplier: f64,
-    pub active_miners: u32,
-    pub challenge: [u8; 32],
-    pub _best_nonce: u64,
-    pub miner_supplied_difficulty: u32,
-    pub miner_earned_rewards: f64,
-	pub miner_percentage: f64,
-}
-
-impl ServerMessagePoolSubmissionResult {
-    pub fn new_from_bytes(b: Vec<u8>) -> Self {
-        let mut b_index = 1;
-
-        let data_size = size_of::<u32>();
-        let mut data_bytes = [0u8; size_of::<u32>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let difficulty = u32::from_le_bytes(data_bytes);
-
-        let data_size = size_of::<f64>();
-        let mut data_bytes = [0u8; size_of::<f64>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let total_balance = f64::from_le_bytes(data_bytes);
-
-        let data_size = size_of::<f64>();
-        let mut data_bytes = [0u8; size_of::<f64>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let total_rewards = f64::from_le_bytes(data_bytes);
-
-        let data_size = size_of::<f64>();
-        let mut data_bytes = [0u8; size_of::<f64>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let top_stake = f64::from_le_bytes(data_bytes);
-
-        let data_size = size_of::<f64>();
-        let mut data_bytes = [0u8; size_of::<f64>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let multiplier = f64::from_le_bytes(data_bytes);
-
-        let data_size = size_of::<u32>();
-        let mut data_bytes = [0u8; size_of::<u32>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let active_miners = u32::from_le_bytes(data_bytes);
-
-        let data_size = 32;
-        let mut data_bytes = [0u8; 32];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let challenge = data_bytes.clone();
-
-        let data_size = size_of::<u64>();
-        let mut data_bytes = [0u8; size_of::<u64>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let best_nonce = u64::from_le_bytes(data_bytes);
-
-        let data_size = size_of::<u32>();
-        let mut data_bytes = [0u8; size_of::<u32>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let miner_supplied_difficulty = u32::from_le_bytes(data_bytes);
-
-        let data_size = size_of::<f64>();
-        let mut data_bytes = [0u8; size_of::<f64>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        b_index += data_size;
-        let miner_earned_rewards = f64::from_le_bytes(data_bytes);
-
-        let data_size = size_of::<f64>();
-        let mut data_bytes = [0u8; size_of::<f64>()];
-        for i in 0..data_size {
-            data_bytes[i] = b[i + b_index];
-        }
-        //b_index += data_size;
-        let miner_percentage = f64::from_le_bytes(data_bytes);
-
-        ServerMessagePoolSubmissionResult {
-            difficulty,
-            total_balance,
-            total_rewards,
-            top_stake,
-            multiplier,
-            active_miners,
-            challenge,
-            _best_nonce: best_nonce,
-            miner_supplied_difficulty,
-            miner_earned_rewards,
-            miner_percentage,
-        }
-    }
-
-    // pub fn to_message_binary(&self) -> Vec<u8> {
-    //     let mut bin_data = Vec::new();
-    //     bin_data.push(1u8);
-    //     bin_data.extend_from_slice(&self.difficulty.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.total_balance.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.total_rewards.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.top_stake.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.multiplier.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.active_miners.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.challenge);
-    //     bin_data.extend_from_slice(&self.best_nonce.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.miner_supplied_difficulty.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.miner_earned_rewards.to_le_bytes());
-    //     bin_data.extend_from_slice(&self.miner_percentage.to_le_bytes());
-
-    //     bin_data
-    // }
-}
-
-#[derive(Debug)]
-pub enum ServerMessage {
-    StartMining([u8; 32], Range<u64>, u64),
-    PoolSubmissionResult(ServerMessagePoolSubmissionResult),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ThreadSubmission {
-    pub nonce: u64,
-    pub difficulty: u32,
-    pub d: [u8; 16], // digest
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum MessageSubmissionSystem {
-    Submission(ThreadSubmission),
-    Reset,
-    Finish,
-}
-
-#[derive(Debug, Parser)]
-pub struct MineArgs {
-    #[arg(
-        long,
-        value_name = "threads",
-        default_value = "4",
-        help = "Number of threads to use while mining"
-    )]
-    pub threads: u32,
-    #[arg(
-        long,
-        value_name = "BUFFER",
-        default_value = "0",
-        help = "Buffer time in seconds, to send the submission to the server earlier"
-    )]
-    pub buffer: u32,
-}
-
-pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
+pub async fn minepmc(args: MineArgs, passedkey: Keypair, url: String, unsecure: bool) {
     let running = Arc::new(AtomicBool::new(true));
-    let key = Arc::new(key);
+
+	let key = Arc::new(passedkey);
+	
+	let ms_dimmed=("ms").dimmed();
+	
+	let mut pass_start_time: Instant = Instant::now();
+	let mining_pass = Arc::new(AtomicU64::new(0)); // Create an atomic counter	
+	
+	// OVERMINE_BY_MS: The pool server allow several secs by default between finishing mining & signing your submission. 
+	// overmine_by_ms allows shortening this duration to enable up until the server has started to submit the transaction.
+	let overmine_by_ms_str=env::var("OVERMINE_BY_MS").unwrap_or("4200".to_string());
+	let overmine_by_ms: u64 = overmine_by_ms_str.parse().unwrap_or(4200);
+	println!("        Setting overmine_by_ms duration to {}{}", overmine_by_ms.to_string().blue(), ms_dimmed);
+
+	// NONCE_INIT_INTERVAL: This value is used in the calculation to guestimate how long your miner takes to do a hash.
+	// It is used to tune how accurate you can end your mining time to a precise time
+	// A higher interval is better (~1% of your processed count)
+	// Aim for an accuracy of <50ms on average
+	let nonce_init_interval_str=env::var("NONCE_INIT_INTERVAL").unwrap_or("100".to_string());
+	let nonce_init_interval: u64 = nonce_init_interval_str.parse().unwrap_or(100);
+	println!("        Setting nonce_init_interval to {}", nonce_init_interval.to_string().blue());
+
+	// CORE_OFFSET: An offset so that you can begin the mining threads starting from the CORE_OFFSET value. 
+	// This allows you to potentially run multiple miners on the same machine but not tie them to all start threads on core 0
+	let core_offset_str=env::var("CORE_OFFSET").unwrap_or("0".to_string());
+	let core_offset: u32 = core_offset_str.parse().unwrap_or(0);
+	println!("        Setting core_offset to {}", core_offset.to_string().blue());
 
     loop {
 		let connection_started=Instant::now();
@@ -227,7 +90,15 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             format!("wss://{}/v2/ws", url)
         };
 
-        let client = reqwest::Client::new();
+        // let client = reqwest::Client::new();
+		let client = reqwest::Client::builder()
+				.timeout(Duration::from_secs(2))
+				.tcp_nodelay(true)  // Disable Nagle's algorithm
+				.tcp_keepalive(Some(Duration::from_secs(60)))
+				.pool_idle_timeout(Some(Duration::from_secs(30)))
+				.pool_max_idle_per_host(5)
+				.build()
+				.expect("Failed to setup client connection");
 
         let http_prefix = if unsecure {
             "http".to_string()
@@ -271,7 +142,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
             }
         };
 
-        println!("Server Timestamp: {}", timestamp);
+        println!("\tServer Timestamp: {}", timestamp);
 
         let ts_msg = timestamp.to_le_bytes();
         let sig = key.sign_message(&ts_msg);
@@ -283,22 +154,24 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
         let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
 
-        println!("Connecting to server...");
-        let request = Request::builder()
-            .method("GET")
-            .uri(url.to_string())
-            .header("Sec-Websocket-Key", generate_key())
-            .header("Host", host)
-            .header("Upgrade", "websocket")
-            .header("Connection", "upgrade")
-            .header("Sec-Websocket-Version", "13")
-            .header("Authorization", format!("Basic {}", auth))
-            .body(())
-            .unwrap();
+        println!("\tConnecting to server...");
+        let websocket_request = Request::builder()
+			.method(Method::GET)
+			.uri(url.to_string())
+			.header(UPGRADE, "websocket")
+			.header(CONNECTION, "Upgrade")
+			.header(SEC_WEBSOCKET_KEY, generate_key())
+			.header(HOST, host)
+			.header(SEC_WEBSOCKET_VERSION, "13")
+			.header(AUTHORIZATION, format!("Basic {}", auth))
+			.body(())
+			.unwrap();
 
-        match connect_async(request).await {
+        match connect_async_with_config(websocket_request, None, true).await {
             Ok((ws_stream, _)) => {
-				println!("{}{}{}", 
+				let elapsed_str2=get_elapsed_string(pass_start_time);
+				println!("{}{}{}{}", 
+					elapsed_str2, 
 					"Server: ".dimmed(), 
 					format!("Connected to network!").blue(),
 					format!(" [{}ms]", connection_started.elapsed().as_millis()).dimmed(),
@@ -389,22 +262,26 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                 tokio::spawn(async move {
                     let app_db = AppDatabase::new();
-
                     while let Some(msg) = db_receiver.recv().await {
                         app_db.add_new_pool_submission(msg);
                         let total_earnings = amount_to_ui_amount(
                             app_db.get_todays_earnings(),
                             ore_api::consts::TOKEN_DECIMALS,
                         );
-                        println!("Todays Earnings: {} ORE\n", total_earnings);
+                        println!("\t{}", format!("Todays Earnings: {} ORE @ {} on {}", total_earnings, Local::now().format("%H:%M:%S"), Local::now().format("%Y-%m-%d")).green());
                     }
                 });
+
+				pass_start_time = Instant::now();
+				set_global_pass_start_time(pass_start_time, mining_pass.load(Ordering::Relaxed));
+				let mining_pass_clone = mining_pass.clone(); // Clone the Arc for the async block
 
                 // receive messages
                 let s_system_submission_sender = solution_system_submission_sender.clone();
                 while let Some(msg) = message_receiver.recv().await {
                     let system_submission_sender = s_system_submission_sender.clone();
                     let db_sender = db_sender.clone();
+					let mining_pass = mining_pass_clone.clone(); // Clone for the spawn
                     tokio::spawn({
                         let message_sender = sender.clone();
                         let key = key.clone();
@@ -413,20 +290,40 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                             if !running.load(Ordering::SeqCst) {
                                 return;
                             }
+							
+							// Show a name for this miner at the start of each pass - e.g. MINER_NAME=$(hostname)
+							let miner_name = env::var("MINER_NAME").unwrap_or("".to_string());
 
+							let mut elapsed_str: String;
                             match msg {
                                 ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
-                                    println!(
-                                        "\nNext Challenge: {}",
+									let elapsed_str3 = get_elapsed_string(get_global_pass_start_time());
+									println!("{}{} {}", 
+										elapsed_str3,
+										"server:".dimmed(),
+										"Start mining next pass".blue(),
+									); 
+
+									let pass_start_time = Instant::now();
+									let solve_start_time_local_ms = Local::now().timestamp_micros();
+									let ms_dimmed=("ms").dimmed();
+
+									let current_pass = mining_pass.fetch_add(1, Ordering::SeqCst) + 1;
+									record_tx_complete();
+									set_no_more_submissions(false);
+									set_global_pass_start_time(pass_start_time, current_pass as u64);
+
+									println!("\n\n{} mining pass {} [{} threads]:", miner_name.clone(), current_pass, args.threads);
+									println!("{}", format!(
+                                        "Next Challenge: {}",
                                         BASE64_STANDARD.encode(challenge)
-                                    );
-                                    println!(
+                                    ).dimmed());
+									println!("{}", format!(
                                         "Nonce range: {} - {}",
                                         nonce_range.start, nonce_range.end
-                                    );
-                                    println!("Cutoff in: {}s", cutoff);
-
-                                    // Adjust the cutoff with the buffer
+                                    ).dimmed());
+                                    
+                                    // Adjust the cutoff time to accomodate a buffer 
                                     let mut cutoff = cutoff.saturating_sub(args.buffer as u64);
                                     if cutoff > 60 {
                                         cutoff = 55;
@@ -452,126 +349,209 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                         )
                                     };
 
-                                    println!();
-                                    pb.set_message("Mining...");
+									// Determine how close to the cuttoff time to mine up to
+									let mut cutoff = cutoff.saturating_sub(args.buffer as u64);
+									if cutoff > 60 {
+										cutoff = 55;
+									}
+									let cutoff_with_overmine=(cutoff*1_000_000)+(overmine_by_ms as u64*1000);
+									let cutoff_timestamp_ms: i128 = Local::now().timestamp_micros() as i128 
+													+ (cutoff_with_overmine as i128)
+													- (get_miner_accuracy() * 1000.0) as i128;
+
+									elapsed_str = get_elapsed_string(pass_start_time);
+									println!("{}Mine for {:.2}s - Default: {}s", elapsed_str,
+													(cutoff_with_overmine as f64 - (get_miner_accuracy()*1000.0)) / 1_000_000.0,
+													cutoff,
+									);
+									println!("{}{}", elapsed_str,	format!("Nonce range: {} - {}", nonce_range.start, nonce_range.end).dimmed());
+									let nonces_per_thread = (nonce_range.end-nonce_range.start).saturating_div(2).saturating_div(threads as u64); //10_000;
+		
+                                    pb.set_message("      Mining...");
                                     pb.enable_steady_tick(Duration::from_millis(120));
 
-                                    // Original mining code
-                                    let hash_timer = Instant::now();
-                                    let core_ids = core_affinity::get_core_ids().unwrap();
-                                    let nonces_per_thread = 10_000;
-                                    let handles = core_ids
-                                        .into_iter()
-                                        .map(|i| {
-                                            let running = running.clone(); // Capture running in thread
-                                            let system_submission_sender = system_submission_sender.clone();
-                                            std::thread::spawn({
-                                                let mut memory = equix::SolverMemory::new();
-                                                move || {
-                                                    if (i.id as u32).ge(&threads) {
-                                                        return None;
-                                                    }
+									let core_ids = core_affinity::get_core_ids().unwrap();
 
-                                                    let _ = core_affinity::set_for_current(i);
+									// Best solution will be updated by each thread as better difficulties are found
+									let best_solution: Arc<MiningSolution> = MiningSolution::new(Keypair::from_bytes(&key.to_bytes()).unwrap());
 
-                                                    let first_nonce = nonce_range.start
-                                                        + (nonces_per_thread * (i.id as u64));
-                                                    let mut nonce = first_nonce;
-                                                    let mut best_nonce = nonce;
-                                                    let mut best_difficulty = 0;
-                                                    let mut best_hash = drillx_2::Hash::default();
-                                                    let mut total_hashes: u64 = 0;
+									// Startup Threads+1 actual threads. Extra one is a control thread
+									let handles: Vec<_> = (0..threads).map(|thread_number| {									
+										// Get a handle to the best_solution 
+										let best_solution = Arc::clone(&best_solution);
+										let system_submission_sender = system_submission_sender.clone();
+										let core_id = core_ids[(thread_number + core_offset) as usize];
+										let keypair_being_mined = 0;
+										let builder = std::thread::Builder::new()
+											.name(format!("ore_hq_cl_{}", thread_number + core_offset))
+											.stack_size(256*1024);	// Attempt to reduce memory requirements for each thread
+										builder.spawn({	
+											move || {
+												// Mining Thread
+												let mut memory = equix::SolverMemory::new();
+												let _ = core_affinity::set_for_current(core_id);
+												// println!("Assigning thread {} to core_id {}", thread_number, core_id.id);
+												let first_nonce = nonce_range.start + (nonces_per_thread * (thread_number as u64));
+												let mut nonce = first_nonce;
+												let mut nonces_current_interval = nonce_init_interval*2;
+												let mut cutoff_nonce = nonce + nonces_current_interval;
+												let mut current_nonces_per_ms: f64 ; // = 200.0;
+												let mut thread_hashes: u32 = 0;
+												let loop_start_time_local_ms = Local::now().timestamp_micros();
+												let mut current_timestamp_ms: i64; // = Local::now().timestamp_micros();
+												
+												let left = cutoff_timestamp_ms-loop_start_time_local_ms as i128 / 1000000;
+												let mut more_than_5_secs_left=1;
+												if left<5 { more_than_5_secs_left=0; }
+												
+												let mut this_threads_difficulty=6;
+												let mut difficulty: u32;
+												let mut seed = [0_u8; 40];
+												let mut equix_builder=equix::EquiXBuilder::new();
+												let equix_rt = equix_builder.runtime(equix::RuntimeOption::TryCompile);
+												let mut nonce_le_bytes: [u8; 8];
+												seed[00..32].copy_from_slice(&challenge);
+												loop {
+													nonce_le_bytes=nonce.to_le_bytes();
+													// let start_time=Instant::now();
+													seed[32..40].copy_from_slice(&nonce_le_bytes);
+													match equix_rt.build(&seed).map_err(|_| drillx_2::DrillxError::BadEquix) {
+														Ok(equix) => {
+															let solutions = equix.solve_with_memory(&mut memory);
+															for solution in solutions {
+																let digest = solution.to_bytes();
+																let hash = drillx_2::hashv(&digest, &nonce_le_bytes);
+																thread_hashes = thread_hashes.wrapping_add(1);
+																
+																// Determine the number of leading zeroes
+																difficulty = 0;
+																for byte in hash {
+																	if byte == 0 {
+																		difficulty = difficulty.wrapping_add(8);
+																	} else {
+																		difficulty = difficulty.wrapping_add(byte.leading_zeros());
+																		break;
+																	}
+																}
 
-                                                    loop {
-                                                        // Check if Ctrl+C was pressed
-                                                        if !running.load(Ordering::SeqCst) {
-                                                            return None;
-                                                        }
+																if difficulty>this_threads_difficulty {
+																	this_threads_difficulty=difficulty;
+																	let better_diff = best_solution.check_for_improved_difficulty(difficulty, nonce, digest, pass_start_time, first_nonce, keypair_being_mined);
+																	if better_diff {
+																		// A higher difficulty has been found since the last difficulty was sent to server 
+																		// Send higher difficulty & hope it gets there before the server processes your account
+																		let (_best_difficulty, _best_nonce, _best_digest, _key, _key_pubkey, _difficulty_submitted)= best_solution.read();
+																		if !is_transaction_in_progress() {
+																			let thread_submission = ThreadSubmission{
+																				nonce,
+																				difficulty: this_threads_difficulty,
+																				d: digest,
+																			};
+																			let _ = system_submission_sender.send(MessageSubmissionSystem::Submission(thread_submission));
+																		
+																			best_solution.update_difficulty_submitted(this_threads_difficulty);
 
-                                                        // Create hash
-                                                        for hx in drillx_2::get_hashes_with_memory(
-                                                            &mut memory,
-                                                            &challenge,
-                                                            &nonce.to_le_bytes(),
-                                                        ) {
-                                                            total_hashes += 1;
-                                                            let difficulty = hx.difficulty();
-                                                            if difficulty.gt(&7) && difficulty.gt(&best_difficulty) {
-                                                                let thread_submission = ThreadSubmission{
-                                                                        nonce,
-                                                                        difficulty,
-                                                                        d: hx.d,
-                                                                };
-                                                                if let Err(_) = system_submission_sender.send(MessageSubmissionSystem::Submission(thread_submission)) {
-                                                                        println!("Failed to send found hash to internal submission system");
-                                                                }
-                                                                best_nonce = nonce;
-                                                                best_difficulty = difficulty;
-                                                                best_hash = hx;
-                                                            }
-                                                        }
+																		} else {
+																			let elapsed_str = get_elapsed_string(pass_start_time);
+																			println!("{}{}", elapsed_str, format!("Too late to submit {} ...", this_threads_difficulty).yellow());
+																		}
+																	}
+																}
+															}
+														},
+														Err(_err) => {
+															// Handle the error case from equix
+															// println!("Error with equix: {:?}", err);
+														}
+													}
 
-                                                        // Exit if processed nonce range
-                                                        if nonce >= nonce_range.end {
-                                                            break;
-                                                        }
+													// Increment nonce & process only when we reach the cutoff_nonce
+													nonce=nonce.wrapping_add(1);
+													if nonce >= cutoff_nonce {
+														current_timestamp_ms = Local::now().timestamp_micros();
+														
+														// Determine current nonces per ms for the duration so far
+														current_nonces_per_ms = (nonce-first_nonce) as f64 / (current_timestamp_ms as i128 - loop_start_time_local_ms as i128) as f64;
 
-                                                        if nonce % 100 == 0 {
-                                                            if hash_timer.elapsed().as_secs().ge(&cutoff) {
-                                                                if best_difficulty.ge(&8) {
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
+														if more_than_5_secs_left>0 {		// called before the end of the mining pass - to target 5s before cutoff timestamp to ensure accurate finishing time
+															nonces_current_interval = ((cutoff_timestamp_ms - current_timestamp_ms as i128 - 5_000_000) as f64 * current_nonces_per_ms) as u64;
+														
+														} else {							// called at 5s before the end of the mining pass - to rarget 2.5ms before cutoff timestamp
+															nonces_current_interval = ((cutoff_timestamp_ms - current_timestamp_ms as i128  - 2_500) as f64 * current_nonces_per_ms) as u64;
+														}
+														more_than_5_secs_left-=1;
 
-                                                        // Increment nonce
-                                                        nonce += 1;
-                                                    }
+														// Set the number of the cutoff nonce where the next check for completion will take place
+														cutoff_nonce = nonce.wrapping_add(nonces_current_interval);
+														
+														// Exit loop if <1 non to get to cutoff
+														if nonces_current_interval<1 {
+															// let elapsed_str = get_elapsed_string(pass_start_time);
+															// println!("{}[{}] Stopping as nonces_current_interval<1: {} current_nonces_per_ms: {} ms_to_go: {}", 
+															// 	elapsed_str, thread_number, nonces_current_interval, current_nonces_per_ms, (cutoff_timestamp_ms - current_timestamp_ms as i128));
+															break;
+														}
+														// Exit if processed nonce range
+														if nonce >= nonce_range.end {
+															// let elapsed_str = get_elapsed_string(pass_start_time);
+															// println!("{}[{}] Stopping at end of nonce range: {}", elapsed_str, thread_number, nonce_range.end);
+															break;
+														}
 
-                                                    // Return the best nonce
-                                                    Some((
-                                                        best_nonce,
-                                                        best_difficulty,
-                                                        best_hash,
-                                                        total_hashes,
-                                                    ))
-                                                }
-                                            })
-                                        })
-                                        .collect::<Vec<_>>();
+														// Exit if mining pass has ended
+														if is_transaction_in_progress() {
+															// let elapsed_str = get_elapsed_string(pass_start_time);
+															// println!("{}[{}] Stopping as transaction is in progress", elapsed_str, thread_number);
+															break;
+														}
+													}
+												}
+												
+												// Return the number of hashes processed - best_solution contains best difficulty from all threads
+												Some(thread_hashes)
+											}
+										})
+									}).collect::<Vec<_>>();
 
-                                    // Join handles and return best nonce
-                                    let mut best_difficulty = 0;
-                                    let mut total_nonces_checked = 0;
-                                    for h in handles {
-                                        if let Ok(Some((
-                                            _nonce,
-                                            difficulty,
-                                            _hash,
-                                            nonces_checked,
-                                        ))) = h.join()
-                                        {
-                                            total_nonces_checked += nonces_checked;
-                                            if difficulty > best_difficulty {
-                                                best_difficulty = difficulty;
-                                            }
-                                        }
-                                    }
-
-                                    let hash_time = hash_timer.elapsed();
+									// Join handles and return best nonce
+									let mut total_nonces_checked = 0;
+									for h in handles {
+										if let Ok(Some(/*nonce, difficulty, hash, */nonces_checked)) = h.unwrap().join() {
+											total_nonces_checked += nonces_checked;
+										}
+									}
+									let (best_difficulty, _best_nonce, _best_digest, _key, _key_pubkey, _difficulty_submitted)= best_solution.read();
+									let finished_mining_local_ms=Local::now().timestamp_micros();
+									let mining_took_ms = finished_mining_local_ms - solve_start_time_local_ms;
+							
+									// log the hash accuracy time
+									let overmined_by_ms=(finished_mining_local_ms-cutoff_timestamp_ms as i64) as f64/1000.0;
+									elapsed_str = get_elapsed_string(pass_start_time);
+									println!("{}{}", 
+										elapsed_str.clone(),
+										format!("Finished mining after {:.2}s. Accuracy: {:.0}{}",
+											mining_took_ms as f64 /1000000.0,
+											overmined_by_ms, ms_dimmed,
+										).yellow().dimmed(),
+									);
+									
+									// Detect if end of mining pass
+									if (cutoff_timestamp_ms as i64)< (Local::now().timestamp_micros()-1_000_000) {
+										record_miner_accuracy(overmined_by_ms);
+									}
 
                                     // Stop the spinner after mining is done
                                     pb.finish_and_clear();
-                                    println!("✔ Mining complete!");
-                                    println!("Processed: {}", total_nonces_checked);
-                                    println!("Hash time: {:?}", hash_time);
-                                    let hash_time_secs = hash_time.as_secs();
+                                    // println!("✔ Mining complete!");
+                                    println!("\tProcessed: {}", total_nonces_checked);
+                                    println!("\tHash time: {:.2}", mining_took_ms as f64 /1000000.0);
+                                    let hash_time_secs = (mining_took_ms as f64 /1000000.0) as u32;
                                     if hash_time_secs > 0 {
                                         println!(
-                                            "Hashpower: {:?} H/s",
+                                            "\tHashpower: {:?} H/s",
                                             total_nonces_checked.saturating_div(hash_time_secs)
                                         );
-                                        println!("Client found diff: {}", best_difficulty);
+                                        println!("\tClient found diff: {}", best_difficulty);
                                     }
 
                                     let _ = system_submission_sender
@@ -621,18 +601,18 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     );
                                     let _ = db_sender.send(ps);
 
-                                    let message = format!(
-                                        "\n\nChallenge: {}\nPool Submitted Difficulty: {}\nPool Earned:  {:.11} ORE\nPool Balance: {:.11} ORE\nTop Stake:    {:.11} ORE\nPool Multiplier: {:.2}x\n----------------------\nActive Miners: {}\n----------------------\nMiner Submitted Difficulty: {}\nMiner Earned: {:.11} ORE\n{:.2}% of total pool reward\n",
+                                    let message = format!(		
+                                        "\n_________________________________________________________________\nPrevious Challenge: {}\nPool Submitted Difficulty: {}\t\tMiner: {}\nPool Earned:  {} ORE\tMiner: {} ORE\nPool Balance: {:.11} ORE\t{} of total pool reward\nTop Stake:    {:.11} ORE\nPool Multiplier: {:.2}x\nActive Miners:   {}\n‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾",
                                         BASE64_STANDARD.encode(data.challenge),
-                                        data.difficulty,
-                                        data.total_rewards,
+                                        format!("{}", data.difficulty).blue(),
+                                        format!("{}", data.miner_supplied_difficulty).green(),
+                                        format!("{:11}", data.total_rewards).blue(),
+                                        format!("{:11}", data.miner_earned_rewards).green(),
                                         data.total_balance,
+                                        format!("{:.3}%", data.miner_percentage).green(),
                                         data.top_stake,
                                         data.multiplier,
                                         data.active_miners,
-                                        data.miner_supplied_difficulty,
-                                        data.miner_earned_rewards,
-                                        data.miner_percentage
                                     );
                                     println!("{}", message);
                                 }
@@ -670,10 +650,22 @@ fn process_message(
     msg: Message,
     message_channel: UnboundedSender<ServerMessage>,
 ) -> ControlFlow<(), bool> {
-    let mut got_start_mining_message = false;
+	let pass_start_time = get_global_pass_start_time();
+	let elapsed_str = get_elapsed_string(pass_start_time);
+	let mut got_start_mining_message = false;
     match msg {
         Message::Text(t) => {
-            println!("{}", t);
+			if t.starts_with("Pool Submitted") {
+				println!("{}{}", elapsed_str, "Server: Rewards Received".bright_magenta());
+			} else {
+				println!("{}{}{}", elapsed_str, "Server: ".dimmed(), t.blue());	
+			}
+			if t=="Server is sending mine transaction..." {
+				if !is_transaction_in_progress() {
+					record_tx_started();
+				}
+				set_no_more_submissions(true);
+			}
         }
         Message::Binary(b) => {
             let message_type = b[0];
@@ -790,6 +782,77 @@ async fn submission_system(
             MessageSubmissionSystem::Finish => {
                 return;
             }
+        }
+    }
+}
+
+// SAFETY: We ensure that access to `digest` is properly synchronized
+// through the `check_for_improved_difficulty` method.
+unsafe impl Sync for MiningSolution {}
+struct MiningSolution {
+    difficulty: AtomicU32,
+    difficulty_submitted: AtomicU32,
+    nonce: AtomicU64,
+	digest: UnsafeCell<[u8; 16]>,
+	key: Keypair,
+}
+
+impl MiningSolution {
+    fn new(key: Keypair) -> Arc<Self> {
+		let hx=drillx_2::Hash::default();
+        Arc::new(Self {
+            difficulty: AtomicU32::new(0),
+			difficulty_submitted: AtomicU32::new(0),
+            nonce: AtomicU64::new(0),
+			digest: UnsafeCell::new(hx.d),
+			key,
+        })
+    }
+
+    fn _update_difficulty(&self, new_difficulty: u32) {
+        self.difficulty.store(new_difficulty, Ordering::Relaxed);
+    }
+
+    fn _update_nonce(&self, new_nonce: u64) {
+        self.nonce.store(new_nonce, Ordering::Relaxed);
+    }
+
+	fn update_difficulty_submitted(&self, the_difficulty: u32) {
+		self.difficulty_submitted.store(the_difficulty, Ordering::Relaxed);
+	}
+
+    fn read(&self) -> (u32, u64, [u8; 16], &Keypair, [u8; 32], u32) {
+        let difficulty = self.difficulty.load(Ordering::Relaxed);
+        let difficulty_submitted = self.difficulty_submitted.load(Ordering::Relaxed);
+        let nonce = self.nonce.load(Ordering::Relaxed);
+        // SAFETY: We're only reading the digest, which is safe as long as we're not writing to it
+        let digest = unsafe { *self.digest.get() };
+        // let key = unsafe { *self.key.get() };
+        (difficulty, nonce, digest, &self.key, self.key.pubkey().to_bytes(), difficulty_submitted)
+    }
+
+	fn check_for_improved_difficulty(&self, current_difficulty: u32, current_nonce: u64, digest: [u8; 16], _pass_start_time: Instant, _first_nonce: u64, _keypair_being_mined: u32) -> bool {
+        if current_difficulty > self.difficulty.load(Ordering::Relaxed) {
+			if is_transaction_in_progress() {
+				return false;
+			}
+
+            self.difficulty.store(current_difficulty, Ordering::Relaxed);
+            self.nonce.store(current_nonce, Ordering::Relaxed);
+            // SAFETY: We're ensuring single-threaded access to `digest` by checking difficulty first
+			unsafe { *self.digest.get() = digest };
+
+			println!("{}[{}{}] {} {}",
+				"\x1B[1A ",
+				format!("{:>4.1}", (_pass_start_time.elapsed().as_millis() as f64 / 1000.0)).dimmed(), 
+				("s".dimmed()).to_string(),
+				format!("Mined").dimmed(),
+				format!("diff {}", current_difficulty).bright_cyan(),
+				// format!("nonce {}", current_nonce-_first_nonce).cyan(),
+			);
+            true
+        } else {
+            false
         }
     }
 }

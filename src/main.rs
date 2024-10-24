@@ -1,3 +1,6 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use balance::balance;
 use claim::ClaimArgs;
 use clap::{Parser, Subcommand};
@@ -6,6 +9,7 @@ use dirs::home_dir;
 use generate_key::generate_key;
 use inquire::{Confirm, Select, Text};
 use mine::{mine, MineArgs};
+use minepmc::minepmc;
 use protomine::{protomine, MineArgs as ProtoMineArgs};
 use semver::Version;
 use serde_json;
@@ -26,9 +30,11 @@ mod delegate_stake;
 mod earnings;
 mod generate_key;
 mod mine;
+mod minepmc;
 mod protomine;
 mod signup;
 mod stake_balance;
+mod stats;
 mod undelegate_boost;
 mod undelegate_stake;
 
@@ -79,7 +85,9 @@ struct Args {
 enum Commands {
     #[command(about = "Connect to pool and start mining. (Default)")]
     Mine(MineArgs),
-    #[command(about = "Connect to pool and start mining using Prototype Software.")]
+	#[command(about = "Connect to pool and start mining using faster hashing.")]
+    MinePmc(MineArgs),
+	#[command(about = "Connect to pool and start mining using Prototype Software.")]
     Protomine(ProtoMineArgs),
     #[command(about = "Transfer SOL to the pool authority to sign up.")]
     Signup(SignupArgs),
@@ -563,6 +571,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut options = vec![
         "  Mine",
+        "  MinePmc",
         "  Sign up",
         "  Claim Rewards",
         "  View Balances",
@@ -675,6 +684,10 @@ async fn run_command(
         Some(Commands::Mine(args)) => {
             mine(args, key, base_url, unsecure_conn).await;
         }
+        Some(Commands::MinePmc(args)) => {
+			// let key = read_keypair_file(args.keypair.clone()).expect(&format!("Failed to load keypair from file: {}", args.keypair));
+            minepmc(args, key, base_url, unsecure_conn).await;
+        }
         Some(Commands::Protomine(args)) => {
             protomine(args, key, base_url, unsecure_conn).await;
         }
@@ -755,6 +768,51 @@ async fn run_command(
 
                         let args = MineArgs { threads, buffer };
                         mine(args, key, base_url, unsecure_conn).await;
+                    }
+                    "  MinePmc" => {
+                        let core_ids = get_core_ids().unwrap();
+                        let max_threads = core_ids.len();
+
+                        // Ask for the number of threads
+                        let threads: u32 = loop {
+                            let input = Text::new(&format!(
+                                "  Enter the number of threads (default: {}):",
+                                max_threads
+                            ))
+                            .with_default(&max_threads.to_string())
+                            .prompt()?;
+
+                            match input.trim().parse::<u32>() {
+                                Ok(valid_threads)
+                                    if valid_threads > 0 && valid_threads <= max_threads as u32 =>
+                                {
+                                    break valid_threads
+                                }
+                                _ => {
+                                    println!("  Invalid thread count. Please enter a number between 1 and {}.", max_threads);
+                                }
+                            }
+                        };
+
+                        // Ask for buffer time
+                        let buffer: u32 = loop {
+                            let buffer_input =
+                                Text::new("  Enter the buffer time in seconds (optional):")
+                                    .with_default("0")
+                                    .prompt()?;
+
+                            match buffer_input.trim().parse::<u32>() {
+                                Ok(valid_buffer) => break valid_buffer,
+                                _ => {
+                                    println!(
+                                        "  Invalid buffer input. Please enter a valid number."
+                                    );
+                                }
+                            }
+                        };
+
+                        let args = MineArgs { threads, buffer };
+                        minepmc(args, key, base_url, unsecure_conn).await;
                     }
 
                     "  Protomine" => {

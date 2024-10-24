@@ -6,7 +6,7 @@ use reqwest::StatusCode;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 use std::{str::FromStr, time::Duration};
 
-use crate::balance::{get_balance, get_token_balance};
+use crate::balance::get_token_balance;
 
 #[derive(Debug, Parser)]
 pub struct BoostArgs {

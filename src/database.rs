@@ -3,13 +3,13 @@ use std::{path::Path, sync::RwLock};
 use rusqlite::Connection;
 
 pub struct PoolSubmissionResult {
-    id: i32,
+    _id: i32,
     pool_difficulty: u32,
     pool_earned: u64,
     miner_percentage: f64,
     miner_difficulty: u32,
     miner_earned: u64,
-    created_at: u64,
+    _created_at: u64,
 }
 
 impl PoolSubmissionResult {
@@ -21,13 +21,13 @@ impl PoolSubmissionResult {
         miner_earned: u64,
     ) -> Self {
         PoolSubmissionResult {
-            id: 0,
+            _id: 0,
             pool_difficulty,
             pool_earned,
             miner_percentage,
             miner_difficulty,
             miner_earned,
-            created_at: 0,
+            _created_at: 0,
         }
     }
 }
@@ -110,7 +110,7 @@ impl AppDatabase {
         }
     }
 
-    pub fn get_daily_earnings(&self, days: u32) -> Vec<(String, u64)> {
+    pub fn get_daily_earnings(&self, _days: u32) -> Vec<(String, u64)> {
         match self.connection.write().unwrap().prepare(
             r#"SELECT DATE(created_at) as day,SUM(miner_earned) as total_earned
                FROM pool_submission_results

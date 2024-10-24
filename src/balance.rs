@@ -1,6 +1,6 @@
 use solana_sdk::{signature::Keypair, signer::Signer};
-use std::collections::HashMap;
-use tokio::time::{sleep, Duration};
+// use std::collections::HashMap;
+// use tokio::time::{sleep, Duration};
 
 pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     let base_url = url;
@@ -27,7 +27,7 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
         .await
         .unwrap();
 
-    let balance = match balance_response.parse::<f64>() {
+    let _balance = match balance_response.parse::<f64>() {
         Ok(b) => b,
         Err(_) => 0.0,
     };
