@@ -941,12 +941,7 @@ async fn run_command(
                             }
                         };
 
-                        let auto = Confirm::new("  Enable auto staking?")
-                            .with_default(true)
-                            .prompt()
-                            .unwrap_or(true);
-
-                        let boost_args = delegate_boost::BoostArgs { amount, mint, auto };
+                        let boost_args = delegate_boost::BoostArgs { amount, mint, auto: true };
                         delegate_boost::delegate_boost(
                             boost_args,
                             key,
