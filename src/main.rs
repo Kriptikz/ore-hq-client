@@ -26,7 +26,6 @@ mod balance;
 mod claim;
 mod database;
 mod delegate_boost;
-mod delegate_stake;
 mod earnings;
 mod generate_key;
 mod mine;
@@ -95,8 +94,6 @@ enum Commands {
     Claim(ClaimArgs),
     #[command(about = "Display current ore token balance.")]
     Balance,
-    #[command(about = "Delegate stake for the pool miner.")]
-    Stake(delegate_stake::StakeArgs),
     #[command(about = "Undelegate stake from the pool miner.")]
     Unstake(undelegate_stake::UnstakeArgs),
     #[command(about = "Delegated stake balance.")]
@@ -577,7 +574,6 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         "  View Balances",
         "  Stake Boost",
         "  Unstake Boost",
-        "  Stake (Legacy)",
         "  Unstake (Legacy)",
         "  Generate Keypair",
         "  Update Client",
@@ -699,9 +695,6 @@ async fn run_command(
         }
         Some(Commands::Balance) => {
             balance(&key, base_url, unsecure_conn).await;
-        }
-        Some(Commands::Stake(args)) => {
-            delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
         }
         Some(Commands::Unstake(args)) => {
             undelegate_stake::undelegate_stake(args, &key, base_url, unsecure_conn).await;
@@ -1015,59 +1008,6 @@ async fn run_command(
                         )
                         .await;
                     }
-                    "  Stake (Legacy)" => {
-                        balance(&key, base_url.clone(), unsecure_conn).await;
-
-                        loop {
-                            let stake_input = Text::new(
-                                "  Enter the amount of ore to stake (or 'esc' to cancel):",
-                            )
-                            .prompt();
-
-                            match stake_input {
-                                Ok(input) => {
-                                    let input = input.trim();
-                                    if input.eq_ignore_ascii_case("esc") {
-                                        println!("  Staking operation canceled.");
-                                        break;
-                                    }
-
-                                    match input.parse::<f64>() {
-                                        Ok(stake_amount) if stake_amount > 0.0 => {
-                                            let args = delegate_stake::StakeArgs {
-                                                amount: stake_amount,
-                                                auto: true,
-                                            };
-                                            delegate_stake::delegate_stake(
-                                                args,
-                                                key,
-                                                base_url.clone(),
-                                                unsecure_conn,
-                                            )
-                                            .await;
-                                            break;
-                                        }
-                                        Ok(_) => {
-                                            println!(
-                                                "  Please enter a valid number greater than 0."
-                                            );
-                                        }
-                                        Err(_) => {
-                                            println!("  Please enter a valid number.");
-                                        }
-                                    }
-                                }
-                                Err(inquire::error::InquireError::OperationCanceled) => {
-                                    println!("  Staking operation canceled.");
-                                    break;
-                                }
-                                Err(_) => {
-                                    println!("  Invalid input. Please try again.");
-                                }
-                            }
-                        }
-                    }
-
                     "  Unstake (Legacy)" => {
                         stake_balance::stake_balance(&key, base_url.clone(), unsecure_conn).await;
 
