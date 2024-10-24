@@ -566,7 +566,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         println!("  ** A new version of the client is available! **");
     }
 
-    let mut options = vec![
+    let options = vec![
         "  Mine",
         "  MinePmc",
         "  Sign up",
@@ -576,18 +576,8 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         "  Unstake Boost",
         "  Unstake (Legacy)",
         "  Generate Keypair",
-        "  Update Client",
         "  Exit",
     ];
-
-    if update_available {
-        for option in options.iter_mut() {
-            if option.trim() == "Update Client" {
-                *option = "  Update Client (* NEW *)";
-                break;
-            }
-        }
-    }
 
     println!();
 
