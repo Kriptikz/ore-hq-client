@@ -36,6 +36,7 @@ mod stake_balance;
 mod stats;
 mod undelegate_boost;
 mod undelegate_stake;
+mod migrate_boosts_to_v2;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -84,7 +85,7 @@ struct Args {
 enum Commands {
     #[command(about = "Connect to pool and start mining. (Default)")]
     Mine(MineArgs),
-	#[command(about = "Connect to pool and start mining using faster hashing.")]
+	#[command(about = "Connect to pool and start mining using pmc's hashing.")]
     MinePmc(MineArgs),
 	#[command(about = "Connect to pool and start mining using Prototype Software.")]
     Protomine(ProtoMineArgs),
@@ -106,6 +107,8 @@ enum Commands {
     DelegateBoost(delegate_boost::BoostArgs),
     #[command(about = "Undelegate boost for the pool miner.")]
     UndelegateBoost(undelegate_boost::UnboostArgs),
+    #[command(about = "Migrate boost accounts to v2 for staking rewards.")]
+    MigrateBoosts,
 }
 
 #[tokio::main]
@@ -568,13 +571,14 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     let options = vec![
         "  Mine",
-        "  MinePmc",
         "  Sign up",
         "  Claim Rewards",
         "  View Balances",
         "  Stake Boost",
         "  Unstake Boost",
+        "  Migrate Boosts",
         "  Unstake (Legacy)",
+        "  MinePmc (Community Implementation)",
         "  Generate Keypair",
         "  Exit",
     ];
@@ -703,6 +707,9 @@ async fn run_command(
         }
         Some(Commands::UndelegateBoost(args)) => {
             undelegate_boost::undelegate_boost(args, key, base_url, unsecure_conn).await;
+        }
+        Some(Commands::MigrateBoosts) => {
+            migrate_boosts_to_v2::migrate_boosts_to_v2(key, base_url, unsecure_conn).await;
         }
         None => {
             if let Some(choice) = selection {
@@ -998,6 +1005,10 @@ async fn run_command(
                         )
                         .await;
                     }
+
+                    "  Migrate Boosts" => {
+                        migrate_boosts_to_v2::migrate_boosts_to_v2(key, base_url.clone(), unsecure_conn).await;
+                    },
                     "  Unstake (Legacy)" => {
                         stake_balance::stake_balance(&key, base_url.clone(), unsecure_conn).await;
 
