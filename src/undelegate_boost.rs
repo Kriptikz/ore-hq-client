@@ -2,9 +2,8 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
 use colored::*;
 use inquire::{InquireError, Text};
-use reqwest::StatusCode;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
-use std::{str::FromStr, time::Duration};
+use std::str::FromStr;
 
 #[derive(Debug, Parser)]
 pub struct UnboostArgs {
@@ -99,7 +98,7 @@ pub async fn undelegate_boost(args: UnboostArgs, key: Keypair, url: String, unse
 
     let boost_amount_u64 =
         (args.amount * 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64)) as u64;
-    let ix = ore_miner_delegation::instruction::undelegate_boost(
+    let ix = ore_miner_delegation::instruction::undelegate_boost_v2(
         key.pubkey(),
         pool_pubkey,
         Pubkey::from_str(&args.mint).unwrap(),
@@ -113,7 +112,7 @@ pub async fn undelegate_boost(args: UnboostArgs, key: Keypair, url: String, unse
 
     let resp = client
         .post(format!(
-            "{}://{}/unstake-boost?pubkey={}&mint={}&amount={}",
+            "{}://{}/v2/unstake-boost?pubkey={}&mint={}&amount={}",
             url_prefix,
             base_url,
             key.pubkey().to_string(),
@@ -138,33 +137,5 @@ pub async fn undelegate_boost(args: UnboostArgs, key: Keypair, url: String, unse
         }
     } else {
         println!("  Transaction failed, please wait and try again.");
-    }
-}
-
-// Helper function to fetch server timestamp
-async fn _get_timestamp(client: &reqwest::Client, url_prefix: &str, base_url: &str) -> u64 {
-    loop {
-        if let Ok(response) = client
-            .get(format!("{}://{}/timestamp", url_prefix, base_url))
-            .send()
-            .await
-        {
-            match response.status() {
-                StatusCode::OK => {
-                    if let Ok(ts) = response.text().await {
-                        if let Ok(ts) = ts.parse::<u64>() {
-                            return ts;
-                        }
-                    }
-                }
-                _ => {
-                    println!("  Server restarting, trying again in 3 seconds...");
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                    continue;
-                }
-            }
-        }
-        println!("  Unable to retrieve timestamp, retrying in 3 seconds...");
-        tokio::time::sleep(Duration::from_secs(3)).await;
     }
 }

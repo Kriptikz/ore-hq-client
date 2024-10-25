@@ -1,6 +1,6 @@
 [package]
 name = "ore-hq-client"
-version = "3.0.1"
+version = "4.0.0"
 edition = "2021"
 description = "Ore mining pool client."
 license = "Apache-2.0"
@@ -15,7 +15,7 @@ core_affinity = "0.8.1"
 ore-api = "2.2.0"
 ore-boost-api = "0.2.0"
 ore-utils = "2.1.8"
-drillx_2 = "1.0.0"
+drillx_2 = "1.1.0"
 futures-util = "0.3.30"
 reqwest = { version = "^0.11.0", features = ["json", "rustls-tls"] }
 rpassword = "7.3.1"
@@ -33,7 +33,7 @@ dirs = "5.0.1"
 colored = "2.0"
 indicatif = "0.17"
 spl-associated-token-account = { version = "2.2", features = ["no-entrypoint"] }
-ore-miner-delegation = { version = "0.5.0", features = ["no-entrypoint"] }
+ore-miner-delegation = { version = "0.6.0", features = ["no-entrypoint"] }
 tiny-bip39 = "0.8.2"
 qrcode = "0.14.1"
 rusqlite = { version = "0.32.1", features = ["bundled"] }

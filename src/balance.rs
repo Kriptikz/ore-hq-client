@@ -12,6 +12,8 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
         "https".to_string()
     };
 
+    println!("Wallet: {}", key.pubkey().to_string());
+
     // Fetch Wallet (Stakeable) Balance
     let balance_response = client
         .get(format!(
@@ -95,8 +97,8 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
     println!("Boosted:");
     for (mint, label) in token_mints.iter() {
         let boosted_token_balance =
-            get_boosted_stake_balance(key, base_url.clone(), unsecure, mint.to_string()).await;
-        println!("  {}: {}", label, boosted_token_balance);
+            get_boosted_stake_balance_v2(key, base_url.clone(), unsecure, mint.to_string()).await;
+        println!("  {}: {}", label, boosted_token_balance.max(0.0));
     }
 }
 
@@ -111,27 +113,6 @@ pub async fn get_token_balance(key: &Keypair, url: String, unsecure: bool, mint:
             url,
             key.pubkey().to_string(),
             mint
-        ))
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-
-    balance_response.parse::<f64>().unwrap_or(0.0)
-}
-
-pub async fn get_balance(key: &Keypair, url: String, unsecure: bool) -> f64 {
-    let client = reqwest::Client::new();
-    let url_prefix = if unsecure { "http" } else { "https" };
-
-    let balance_response = client
-        .get(format!(
-            "{}://{}/miner/balance?pubkey={}",
-            url_prefix,
-            url,
-            key.pubkey().to_string()
         ))
         .send()
         .await
@@ -167,5 +148,32 @@ pub async fn get_boosted_stake_balance(
         .await
         .unwrap();
 
-    balance_response.parse::<f64>().unwrap_or(0.0)
+    balance_response.parse::<f64>().unwrap_or(-1.0)
+}
+
+pub async fn get_boosted_stake_balance_v2(
+    key: &Keypair,
+    url: String,
+    unsecure: bool,
+    mint: String,
+) -> f64 {
+    let client = reqwest::Client::new();
+    let url_prefix = if unsecure { "http" } else { "https" };
+
+    let balance_response = client
+        .get(format!(
+            "{}://{}/v2/miner/boost/stake?pubkey={}&mint={}",
+            url_prefix,
+            url,
+            key.pubkey().to_string(),
+            mint
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    balance_response.parse::<f64>().unwrap_or(-1.0)
 }

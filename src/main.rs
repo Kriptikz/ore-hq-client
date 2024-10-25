@@ -26,7 +26,6 @@ mod balance;
 mod claim;
 mod database;
 mod delegate_boost;
-mod delegate_stake;
 mod earnings;
 mod generate_key;
 mod mine;
@@ -37,6 +36,7 @@ mod stake_balance;
 mod stats;
 mod undelegate_boost;
 mod undelegate_stake;
+mod migrate_boosts_to_v2;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -85,7 +85,7 @@ struct Args {
 enum Commands {
     #[command(about = "Connect to pool and start mining. (Default)")]
     Mine(MineArgs),
-	#[command(about = "Connect to pool and start mining using faster hashing.")]
+	#[command(about = "Connect to pool and start mining using pmc's hashing.")]
     MinePmc(MineArgs),
 	#[command(about = "Connect to pool and start mining using Prototype Software.")]
     Protomine(ProtoMineArgs),
@@ -95,8 +95,6 @@ enum Commands {
     Claim(ClaimArgs),
     #[command(about = "Display current ore token balance.")]
     Balance,
-    #[command(about = "Delegate stake for the pool miner.")]
-    Stake(delegate_stake::StakeArgs),
     #[command(about = "Undelegate stake from the pool miner.")]
     Unstake(undelegate_stake::UnstakeArgs),
     #[command(about = "Delegated stake balance.")]
@@ -109,6 +107,8 @@ enum Commands {
     DelegateBoost(delegate_boost::BoostArgs),
     #[command(about = "Undelegate boost for the pool miner.")]
     UndelegateBoost(undelegate_boost::UnboostArgs),
+    #[command(about = "Migrate boost accounts to v2 for staking rewards.")]
+    MigrateBoosts,
 }
 
 #[tokio::main]
@@ -569,29 +569,19 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         println!("  ** A new version of the client is available! **");
     }
 
-    let mut options = vec![
+    let options = vec![
         "  Mine",
-        "  MinePmc",
         "  Sign up",
         "  Claim Rewards",
         "  View Balances",
         "  Stake Boost",
         "  Unstake Boost",
-        "  Stake (Legacy)",
+        "  Migrate Boosts",
         "  Unstake (Legacy)",
+        "  MinePmc (Community Implementation)",
         "  Generate Keypair",
-        "  Update Client",
         "  Exit",
     ];
-
-    if update_available {
-        for option in options.iter_mut() {
-            if option.trim() == "Update Client" {
-                *option = "  Update Client (* NEW *)";
-                break;
-            }
-        }
-    }
 
     println!();
 
@@ -700,9 +690,6 @@ async fn run_command(
         Some(Commands::Balance) => {
             balance(&key, base_url, unsecure_conn).await;
         }
-        Some(Commands::Stake(args)) => {
-            delegate_stake::delegate_stake(args, key, base_url, unsecure_conn).await;
-        }
         Some(Commands::Unstake(args)) => {
             undelegate_stake::undelegate_stake(args, &key, base_url, unsecure_conn).await;
         }
@@ -720,6 +707,9 @@ async fn run_command(
         }
         Some(Commands::UndelegateBoost(args)) => {
             undelegate_boost::undelegate_boost(args, key, base_url, unsecure_conn).await;
+        }
+        Some(Commands::MigrateBoosts) => {
+            migrate_boosts_to_v2::migrate_boosts_to_v2(key, base_url, unsecure_conn).await;
         }
         None => {
             if let Some(choice) = selection {
@@ -941,12 +931,7 @@ async fn run_command(
                             }
                         };
 
-                        let auto = Confirm::new("  Enable auto staking?")
-                            .with_default(true)
-                            .prompt()
-                            .unwrap_or(true);
-
-                        let boost_args = delegate_boost::BoostArgs { amount, mint, auto };
+                        let boost_args = delegate_boost::BoostArgs { amount, mint, auto: true };
                         delegate_boost::delegate_boost(
                             boost_args,
                             key,
@@ -975,7 +960,7 @@ async fn run_command(
                             .map(|(_, address)| address.to_string())
                             .expect("  Invalid token selection.");
 
-                        let boosted_stake_balance = balance::get_boosted_stake_balance(
+                        let boosted_stake_balance = balance::get_boosted_stake_balance_v2(
                             &key,
                             base_url.clone(),
                             unsecure_conn,
@@ -1020,59 +1005,10 @@ async fn run_command(
                         )
                         .await;
                     }
-                    "  Stake (Legacy)" => {
-                        balance(&key, base_url.clone(), unsecure_conn).await;
 
-                        loop {
-                            let stake_input = Text::new(
-                                "  Enter the amount of ore to stake (or 'esc' to cancel):",
-                            )
-                            .prompt();
-
-                            match stake_input {
-                                Ok(input) => {
-                                    let input = input.trim();
-                                    if input.eq_ignore_ascii_case("esc") {
-                                        println!("  Staking operation canceled.");
-                                        break;
-                                    }
-
-                                    match input.parse::<f64>() {
-                                        Ok(stake_amount) if stake_amount > 0.0 => {
-                                            let args = delegate_stake::StakeArgs {
-                                                amount: stake_amount,
-                                                auto: true,
-                                            };
-                                            delegate_stake::delegate_stake(
-                                                args,
-                                                key,
-                                                base_url.clone(),
-                                                unsecure_conn,
-                                            )
-                                            .await;
-                                            break;
-                                        }
-                                        Ok(_) => {
-                                            println!(
-                                                "  Please enter a valid number greater than 0."
-                                            );
-                                        }
-                                        Err(_) => {
-                                            println!("  Please enter a valid number.");
-                                        }
-                                    }
-                                }
-                                Err(inquire::error::InquireError::OperationCanceled) => {
-                                    println!("  Staking operation canceled.");
-                                    break;
-                                }
-                                Err(_) => {
-                                    println!("  Invalid input. Please try again.");
-                                }
-                            }
-                        }
-                    }
-
+                    "  Migrate Boosts" => {
+                        migrate_boosts_to_v2::migrate_boosts_to_v2(key, base_url.clone(), unsecure_conn).await;
+                    },
                     "  Unstake (Legacy)" => {
                         stake_balance::stake_balance(&key, base_url.clone(), unsecure_conn).await;
 

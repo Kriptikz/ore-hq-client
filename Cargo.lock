@@ -1040,9 +1040,9 @@ dependencies = [
 
 [[package]]
 name = "drillx_2"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af4e3aca4ae86ab0d0050f50b322adab7c0e93904896a5c60bdb33324ea1d36a"
+checksum = "c8c07fbbf335a0d091f1b98584592ad8a69614c23b8eb2c662c682368397c55e"
 dependencies = [
  "equix",
  "serde",
@@ -2226,7 +2226,7 @@ dependencies = [
 
 [[package]]
 name = "ore-hq-client"
-version = "3.0.1"
+version = "4.0.0"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -2268,9 +2268,9 @@ dependencies = [
 
 [[package]]
 name = "ore-miner-delegation"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07c774372a5308d76eec95ebfcffb05bcef0315ed27129959ded76d437dc43ee"
+checksum = "e9266d227c70346f75c877e67299910dd2407a59f60d5e42432b7d27784b969a"
 dependencies = [
  "bytemuck",
  "drillx",
