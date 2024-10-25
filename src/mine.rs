@@ -622,12 +622,11 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     let _ = db_sender.send(ps);
 
                                     let message = format!(
-                                        "\n\nChallenge: {}\nPool Submitted Difficulty: {}\nPool Earned:  {:.11} ORE\nPool Balance: {:.11} ORE\nTop Stake:    {:.11} ORE\nPool Multiplier: {:.2}x\n----------------------\nActive Miners: {}\n----------------------\nMiner Submitted Difficulty: {}\nMiner Earned: {:.11} ORE\n{:.2}% of total pool reward\n",
+                                        "\n\nChallenge: {}\nPool Submitted Difficulty: {}\nPool Earned:  {:.11} ORE\nPool Balance: {:.11} ORE\n\nPool Boosts Multiplier: {:.2}x\n----------------------\nActive Miners: {}\n----------------------\nMiner Submitted Difficulty: {}\nMiner Earned: {:.11} ORE\n{:.2}% of total pool reward\n",
                                         BASE64_STANDARD.encode(data.challenge),
                                         data.difficulty,
                                         data.total_rewards,
                                         data.total_balance,
-                                        data.top_stake,
                                         data.multiplier,
                                         data.active_miners,
                                         data.miner_supplied_difficulty,
