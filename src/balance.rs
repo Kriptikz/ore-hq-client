@@ -12,6 +12,8 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
         "https".to_string()
     };
 
+    println!("Wallet: {}", key.pubkey().to_string());
+
     // Fetch Wallet (Stakeable) Balance
     let balance_response = client
         .get(format!(
