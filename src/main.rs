@@ -759,7 +759,7 @@ async fn run_command(
                         let args = MineArgs { threads, buffer };
                         mine(args, key, base_url, unsecure_conn).await;
                     }
-                    "  MinePmc" => {
+                    "  MinePmc (Community Implementation)" => {
                         let core_ids = get_core_ids().unwrap();
                         let max_threads = core_ids.len();
 

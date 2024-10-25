@@ -58,8 +58,8 @@ pub async fn minepmc(args: MineArgs, passedkey: Keypair, url: String, unsecure: 
 	
 	// OVERMINE_BY_MS: The pool server allow several secs by default between finishing mining & signing your submission. 
 	// overmine_by_ms allows shortening this duration to enable up until the server has started to submit the transaction.
-	let overmine_by_ms_str=env::var("OVERMINE_BY_MS").unwrap_or("4200".to_string());
-	let overmine_by_ms: u64 = overmine_by_ms_str.parse().unwrap_or(4200);
+	let overmine_by_ms_str=env::var("OVERMINE_BY_MS").unwrap_or("2000".to_string());
+	let overmine_by_ms: u64 = overmine_by_ms_str.parse().unwrap_or(2000);
 	println!("        Setting overmine_by_ms duration to {}{}", overmine_by_ms.to_string().blue(), ms_dimmed);
 
 	// NONCE_INIT_INTERVAL: This value is used in the calculation to guestimate how long your miner takes to do a hash.
