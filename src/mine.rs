@@ -457,6 +457,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     pb.enable_steady_tick(Duration::from_millis(120));
 
                                     // Original mining code
+                                    let stop = Arc::new(AtomicBool::new(false));
                                     let hash_timer = Instant::now();
                                     let core_ids = core_affinity::get_core_ids().unwrap();
                                     let nonces_per_thread = 10_000;
@@ -465,6 +466,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                         .map(|i| {
                                             let running = running.clone(); // Capture running in thread
                                             let system_submission_sender = system_submission_sender.clone();
+                                            let stop_me = stop.clone();
                                             std::thread::spawn({
                                                 let mut memory = equix::SolverMemory::new();
                                                 move || {
@@ -488,6 +490,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                                             return None;
                                                         }
 
+                                                        if stop_me.load(Ordering::Relaxed) {
+                                                            break;
+                                                        }
+
                                                         // Create hash
                                                         for hx in drillx_2::get_hashes_with_memory(
                                                             &mut memory,
@@ -503,7 +509,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                                                         d: hx.d,
                                                                 };
                                                                 if let Err(_) = system_submission_sender.send(MessageSubmissionSystem::Submission(thread_submission)) {
-                                                                        println!("Failed to send found hash to internal submission system");
+                                                                        stop_me.store(true, Ordering::Relaxed);
                                                                 }
                                                                 best_nonce = nonce;
                                                                 best_difficulty = difficulty;
@@ -622,7 +628,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
                                     let _ = db_sender.send(ps);
 
                                     let message = format!(
-                                        "\n\nChallenge: {}\nPool Submitted Difficulty: {}\nPool Earned:  {:.11} ORE\nPool Balance: {:.11} ORE\n\nPool Boosts Multiplier: {:.2}x\n----------------------\nActive Miners: {}\n----------------------\nMiner Submitted Difficulty: {}\nMiner Earned: {:.11} ORE\n{:.2}% of total pool reward\n",
+                                        "\n\nChallenge: {}\nPool Submitted Difficulty: {}\nPool Earned:  {:.11} ORE\nPool Balance: {:.11} ORE\nPool Boosts Multiplier: {:.2}x\n----------------------\nActive Miners: {}\n----------------------\nMiner Submitted Difficulty: {}\nMiner Earned: {:.11} ORE\n{:.4}% of total pool reward\n",
                                         BASE64_STANDARD.encode(data.challenge),
                                         data.difficulty,
                                         data.total_rewards,
