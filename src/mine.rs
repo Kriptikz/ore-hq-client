@@ -568,6 +568,10 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String, unsecure: bool) {
 
                                     // Stop the spinner after mining is done
                                     pb.finish_and_clear();
+
+                                    if stop.load(Ordering::Relaxed) {
+                                        return;
+                                    }
                                     println!("✔ Mining complete!");
                                     println!("Processed: {}", total_nonces_checked);
                                     println!("Hash time: {:?}", hash_time);
