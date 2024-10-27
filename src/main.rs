@@ -3,6 +3,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use balance::balance;
 use claim::ClaimArgs;
+use claim_stake_rewards::ClaimStakeRewardsArgs;
 use clap::{Parser, Subcommand};
 use core_affinity::get_core_ids;
 use dirs::home_dir;
@@ -37,6 +38,7 @@ mod stats;
 mod undelegate_boost;
 mod undelegate_stake;
 mod migrate_boosts_to_v2;
+mod claim_stake_rewards;
 
 const CONFIG_FILE: &str = "keypair_list";
 
@@ -109,6 +111,8 @@ enum Commands {
     UndelegateBoost(undelegate_boost::UnboostArgs),
     #[command(about = "Migrate boost accounts to v2 for staking rewards.")]
     MigrateBoosts,
+    #[command(about = "Claim stake rewards.")]
+    ClaimStakeRewards(claim_stake_rewards::ClaimStakeRewardsArgs),
 }
 
 #[tokio::main]
@@ -573,6 +577,7 @@ async fn run_menu(vim_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
         "  Mine",
         "  Sign up",
         "  Claim Rewards",
+        "  Claim Stake Rewards",
         "  View Balances",
         "  Stake Boost",
         "  Unstake Boost",
@@ -710,6 +715,9 @@ async fn run_command(
         }
         Some(Commands::MigrateBoosts) => {
             migrate_boosts_to_v2::migrate_boosts_to_v2(key, base_url, unsecure_conn).await;
+        }
+        Some(Commands::ClaimStakeRewards(args)) => {
+            claim_stake_rewards::claim_stake_rewards(args, key, base_url, unsecure_conn).await;
         }
         None => {
             if let Some(choice) = selection {
@@ -870,6 +878,47 @@ async fn run_command(
                             receiver_pubkey,
                         };
                         claim::claim(args, key, base_url, unsecure_conn).await;
+                    }
+                    "  Claim Stake Rewards" => {
+                        let use_separate_pubkey = Confirm::new(
+                            "  Do you want to claim the rewards to a separate public key?",
+                        )
+                        .with_default(false)
+                        .prompt()?;
+                        let receiver_pubkey = if use_separate_pubkey {
+                            let pubkey_input =
+                                Text::new("  Enter the receiver public key:").prompt()?;
+                            Some(pubkey_input)
+                        } else {
+                            None
+                        };
+
+                        let token_selection = Select::new(
+                            "  Select the mint to claim rewards for:",
+                            TOKEN_OPTIONS
+                                .iter()
+                                .map(|(name, _)| *name)
+                                .collect::<Vec<&str>>(),
+                        )
+                        .prompt()
+                        .unwrap_or_else(|_| {
+                            println!("  Operation canceled.");
+                            std::process::exit(0);
+                        });
+
+                        let mint = TOKEN_OPTIONS
+                            .iter()
+                            .find(|(name, _)| *name == token_selection)
+                            .map(|(_, address)| address.to_string())
+                            .expect("  Invalid token selection.");
+
+                        let args = ClaimStakeRewardsArgs {
+                            amount: None,
+                            y: false,
+                            mint_pubkey: mint,
+                            receiver_pubkey,
+                        };
+                        claim_stake_rewards::claim_stake_rewards(args, key, base_url, unsecure_conn).await;
                     }
                     "  View Balances" => {
                         balance(&key, base_url.clone(), unsecure_conn).await;

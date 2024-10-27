@@ -9,7 +9,7 @@ pub fn earnings() {
 
     for de in daily_earnings {
         println!(
-            "Day: {}, Total Earned: {} ORE",
+            "Day: {}, Total Mined: {} ORE",
             de.0,
             amount_to_ui_amount(de.1, ore_api::consts::TOKEN_DECIMALS)
         );

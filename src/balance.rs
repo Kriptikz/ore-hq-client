@@ -1,4 +1,6 @@
 use solana_sdk::{signature::Keypair, signer::Signer};
+
+use crate::claim_stake_rewards::StakeAccount;
 // use std::collections::HashMap;
 // use tokio::time::{sleep, Duration};
 
@@ -76,8 +78,42 @@ pub async fn balance(key: &Keypair, url: String, unsecure: bool) {
         stake_response.parse::<f64>().unwrap_or(0.0)
     };
 
+    // Fetch Unclaimed Stake Rewards
+    let staker_rewards_response = client
+        .get(format!(
+            "{}://{}/v2/miner/boost/stake-accounts?pubkey={}",
+            url_prefix,
+            base_url,
+            key.pubkey().to_string()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let stake_accounts: Vec<StakeAccount> = match serde_json::from_str(&staker_rewards_response) {
+        Ok(sa) => {
+            sa
+        },
+        Err(_) => {
+            println!("Failed to parse server stake accounts.");
+            return;
+        }
+    };
+
     println!();
-    println!("  Unclaimed Rewards: {:.11} ORE", rewards);
+    println!("Staker Rewards:");
+    let mut total_staker_rewards = 0.0f64;
+    for stake_account in stake_accounts {
+        let claimable_rewards = stake_account.rewards_balance as f64 / 10f64.powf(ore_api::consts::TOKEN_DECIMALS as f64);
+        println!("  {} - {:.11} ORE", stake_account.mint_pubkey,  claimable_rewards);
+        total_staker_rewards += claimable_rewards;
+    }
+
+    println!();
+    println!("  Unclaimed Mining Rewards: {:.11} ORE", rewards);
+    println!("  Unclaimed Staker Rewards: {:.11} ORE", total_staker_rewards);
     println!("  Staked Balance:    {:.11} ORE", staked_balance);
     println!();
 
